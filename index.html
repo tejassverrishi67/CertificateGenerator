@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Zero-Styling Bulk Certificate Generator (PDF & DOCX)</title>
+    <meta name="description" content="Generate certificates in bulk directly from PDF or DOCX templates, preserving original styles automatically.">
+    <!-- Google Fonts -->
+    <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@500;700&family=Playfair+Display:ital,wght@0,600;0,700;1,600&family=Montserrat:wght@500;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="stylesheet" href="styles.css">
+    <!-- PDF.js, jsPDF, JSZip, PizZip, and Docxtemplater -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.4.120/pdf.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+    <script src="https://unpkg.com/pizzip@3.2.0/dist/pizzip.js"></script>
+    <script src="https://unpkg.com/docxtemplater@3.37.11/build/docxtemplater.js"></script>
+</head>
+<body>
+    <div class="container">
+        <header class="header">
+            <div class="logo">
+                <i class="fa-solid fa-wand-magic-sparkles"></i>
+                <span>CertifyAutomator</span>
+            </div>
+            <h1>Smart PDF & DOCX Bulk Certificate Generator</h1>
+            <p class="subtitle">Upload a PDF or Word (DOCX) template containing placeholders like {NAME}, paste mapping data, and generate bulk certificates with original styling preserved.</p>
+        </header>
+
+        <main class="grid-layout">
+            <!-- Left Side: Controls & Input -->
+            <section class="control-panel">
+                <div class="card">
+                    <div class="card-header">
+                        <i class="fa-solid fa-file-invoice"></i>
+                        <h2>1. Upload Template (PDF or DOCX)</h2>
+                    </div>
+                    <div class="upload-zone" id="upload-zone">
+                        <input type="file" id="template-upload" accept="application/pdf,.docx" style="display: none;">
+                        <i class="fa-solid fa-cloud-arrow-up upload-icon"></i>
+                        <p>Drag & drop your PDF or Word DOCX template, or click to browse</p>
+                        <span class="file-name" id="file-name">No template loaded</span>
+                    </div>
+                </div>
+
+                <div class="card">
+                    <div class="card-header">
+                        <i class="fa-solid fa-keyboard"></i>
+                        <h2>2. Mapping Text Box Inputs</h2>
+                    </div>
+                    <div class="textarea-container">
+                        <div class="textarea-actions">
+                            <span class="parser-status" id="parser-status">Waiting for data...</span>
+                            <button class="btn btn-sm btn-secondary" id="btn-load-demo">
+                                <i class="fa-solid fa-vial"></i> Load Example Data
+                            </button>
+                        </div>
+                        <textarea id="data-input" placeholder="Tejassver Rishi1,Ilakkiya2&#10;Student,CSE,CIT,Chennai,India1-2&#10;Festival Stock Prediction1-2&#10;137061-2" rows="6"></textarea>
+                    </div>
+                </div>
+
+                <div class="card action-card">
+                    <!-- Export Actions change based on file type -->
+                    <button class="btn btn-primary" id="btn-generate-zip" disabled>
+                        <i class="fa-solid fa-file-zipper"></i> Download ZIP (Individual Certificates)
+                    </button>
+                    <button class="btn btn-secondary" id="btn-generate-pdf" disabled style="margin-top: 0.5rem;">
+                        <i class="fa-solid fa-file-pdf"></i> Download Single Combined PDF
+                    </button>
+                </div>
+            </section>
+
+            <!-- Right Side: Live Logs & Preview -->
+            <section class="preview-panel">
+                <div class="card log-card">
+                    <div class="card-header">
+                        <i class="fa-solid fa-terminal"></i>
+                        <h2>System Logs</h2>
+                    </div>
+                    <div class="logs" id="logs-container">
+                        <div class="log-entry system"><i class="fa-solid fa-info-circle"></i> Application initialized. Ready for template.</div>
+                    </div>
+                </div>
+
+                <div class="card preview-card" id="preview-card" style="display: none;">
+                    <div class="card-header">
+                        <i class="fa-solid fa-eye"></i>
+                        <h2>Live Preview</h2>
+                        <div class="preview-pager">
+                            <button class="btn-pager" id="btn-prev-page"><i class="fa-solid fa-chevron-left"></i></button>
+                            <span id="preview-index">Certificate 1 of 1</span>
+                            <button class="btn-pager" id="btn-next-page"><i class="fa-solid fa-chevron-right"></i></button>
+                        </div>
+                    </div>
+                    <div class="preview-viewport">
+                        <canvas id="preview-canvas"></canvas>
+                        <div class="docx-preview-msg" id="docx-preview-msg" style="display: none; padding: 2rem; text-align: center; color: var(--text-muted);">
+                            <i class="fa-solid fa-file-word" style="font-size: 3rem; color: #2b579a; margin-bottom: 1rem; display: block;"></i>
+                            Word DOCX Template loaded. Previews are generated in text format. All bulk documents will be saved as fully styled Word documents inside your ZIP file download.
+                        </div>
+                    </div>
+                </div>
+            </section>
+        </main>
+    </div>
+
+    <!-- Configure PDF.js Worker -->
+    <script>
+        pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.4.120/pdf.worker.min.js';
+    </script>
+    <script src="app.js"></script>
+</body>
+</html>
