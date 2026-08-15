@@ -277,6 +277,12 @@ body {
     gap: 0.7rem;
 }
 
+/* An explicit display value on .manual-grid would otherwise override the browser's default
+   [hidden] { display: none } rule, since author styles always beat the UA stylesheet. */
+.manual-grid[hidden] {
+    display: none;
+}
+
 .manual-row {
     display: grid;
     grid-template-columns: repeat(3, 1fr);
