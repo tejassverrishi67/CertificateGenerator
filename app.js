@@ -382,52 +382,42 @@ function renderDocxBlobForRecord(record) {
     });
 }
 
-// Splice one record's rendered body content (all paragraphs before its <w:sectPr>) into
-// the combined document's body, right before the combined document's own <w:sectPr>.
-// Since every record is rendered from the same template, headers/footers/media/relationship
-// IDs are identical across records, so only the body paragraphs need to be merged.
-function appendRecordToCombinedXml(combinedXml, recordXml) {
-    const sectPrOpenTag = '<w:sectPr';
-
-    const recordSectPrIdx = recordXml.lastIndexOf(sectPrOpenTag);
-    const bodyOpenIdx = recordXml.indexOf('<w:body>') + '<w:body>'.length;
-    let recordBodyContent = recordXml.slice(bodyOpenIdx, recordSectPrIdx);
-
-    // Inject the page break as a run inside the record's first paragraph (right after that
-    // paragraph's properties, if any) instead of adding a separate paragraph for it — a
-    // standalone break paragraph renders as extra blank space at the top of the new page.
-    const pageBreakRun = '<w:r><w:br w:type="page"/></w:r>';
-    const firstParaMatch = /<w:p[ >]/.exec(recordBodyContent);
-    const firstParaIdx = firstParaMatch ? firstParaMatch.index : -1;
-    if (firstParaIdx !== -1) {
-        const pPrMatch = /<w:pPr[\s\S]*?<\/w:pPr>/.exec(recordBodyContent.slice(firstParaIdx));
-        const insertAt = pPrMatch
-            ? firstParaIdx + pPrMatch.index + pPrMatch[0].length
-            : recordBodyContent.indexOf('>', firstParaIdx) + 1;
-        recordBodyContent = recordBodyContent.slice(0, insertAt) + pageBreakRun + recordBodyContent.slice(insertAt);
-    } else {
-        recordBodyContent = `<w:p>${pageBreakRun}</w:p>` + recordBodyContent;
-    }
-
-    const combinedSectPrIdx = combinedXml.lastIndexOf(sectPrOpenTag);
-    return (
-        combinedXml.slice(0, combinedSectPrIdx) +
-        recordBodyContent +
-        combinedXml.slice(combinedSectPrIdx)
-    );
+// Extract just the paragraph content of a rendered record's body (everything between
+// <w:body> and its trailing <w:sectPr>, exclusive).
+function extractRecordBodyContent(xml) {
+    const bodyOpenIdx = xml.indexOf('<w:body>') + '<w:body>'.length;
+    const sectPrIdx = xml.lastIndexOf('<w:sectPr');
+    return xml.slice(bodyOpenIdx, sectPrIdx);
 }
 
-// Combine every record's rendered DOCX into a single multi-page DOCX file (one certificate
-// per page, separated by page breaks), reusing the first record's zip as the base package.
+// Combine every record's rendered DOCX into a single multi-page DOCX file, one certificate
+// per page. Records are separated by a real section break (an empty paragraph carrying a
+// copy of the template's own <w:sectPr>) rather than a manual page break: since the template
+// uses <w:titlePg/> (a distinct "first page" header/layout), a manual page break would push
+// every certificate after the first onto the section's "default" (non-first) page, which
+// renders differently (visible as stray whitespace/misalignment). Giving each certificate its
+// own one-page section means every certificate consistently gets the section's "first page"
+// treatment, matching how page 1 renders.
 function buildCombinedDocxBlob(records) {
     const baseZip = renderDocxZipForRecord(records[0]);
-    let combinedXml = baseZip.file('word/document.xml').asText();
+    const xml0 = baseZip.file('word/document.xml').asText();
 
+    const bodyOpenIdx = xml0.indexOf('<w:body>') + '<w:body>'.length;
+    const sectPrStart = xml0.lastIndexOf('<w:sectPr');
+    const sectPrEnd = xml0.indexOf('</w:sectPr>', sectPrStart) + '</w:sectPr>'.length;
+    const sectPrXml = xml0.slice(sectPrStart, sectPrEnd);
+    const prefix = xml0.slice(0, bodyOpenIdx);
+    const suffix = xml0.slice(sectPrEnd); // "</w:body></w:document>"
+
+    const bodies = [extractRecordBodyContent(xml0)];
     for (let i = 1; i < records.length; i++) {
         const recordZip = renderDocxZipForRecord(records[i]);
         const recordXml = recordZip.file('word/document.xml').asText();
-        combinedXml = appendRecordToCombinedXml(combinedXml, recordXml);
+        bodies.push(extractRecordBodyContent(recordXml));
     }
+
+    const sectionBreakParagraph = `<w:p><w:pPr>${sectPrXml}</w:pPr></w:p>`;
+    const combinedXml = prefix + bodies.join(sectionBreakParagraph) + sectPrXml + suffix;
 
     baseZip.file('word/document.xml', combinedXml);
     return baseZip.generate({
