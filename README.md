@@ -32,13 +32,14 @@ Placeholder tags are matched case- and spacing-insensitively (`{Paper Title}`, `
    - **Paper Title**: a line without keyword matches is treated as a paper title. If it has no numeric suffixes it's applied as a constant to every certificate; if it has suffixes, it's mapped per-certificate the same way as names.
    - Use the **"Load Example Data"** button to see a sample of the expected input format.
 
-3. **DOI**: enter the DOI in its own dedicated field (separate from the mapping text box). It's applied as a constant value to every generated certificate, and everything else is derived from it — there are no other fields to fill in.
+3. **Publication details** — volume, issue, year, month and the file number, supplied in one of two modes:
 
-   The final numeric segment packs **volume (2 digits) + issue + file number (2 digits)**, and the segment before it is the year. The issue is whatever sits between volume and file number: one digit for issues 1–9, two digits for issues 10–12. Since the issue number *is* the month of publication, `{month}` is derived from it rather than typed — issue 7 is July, issue 9 is September.
+   - **With DOI** (default): paste the DOI and everything else is derived from it. The final numeric segment packs **volume (2 digits) + issue + file number (2 digits)**, and the segment before it is the year. The issue is whatever sits between volume and file number: one digit for issues 1–9, two digits for issues 10–12. So `10.17148/IJARCCE.2026.15817` → `{year}` `2026`, `{vol}` `15`, `{issue}` `8`, `{month}` `August`, file number `17`.
+   - **Without DOI**: enter **volume**, **issue**, **file number** and **year** by hand. `{DOI}` renders empty on the certificate.
 
-   So `10.17148/IJARCCE.2026.15817` → `{year}` `2026`, `{vol}` `15`, `{issue}` `8`, `{month}` `August`, file number `17`. Each output file is named `"{paper number} {author list} {certificate index}"`; if no DOI is entered, the paper number is omitted from the filename.
+   In both modes the issue number *is* the month of publication, so `{month}` is always derived rather than typed — issue 7 is July, issue 9 is September. `getPublicationInfo()` in `app.js` resolves all of this for whichever mode is active, so the rest of the app never has to care which was used.
 
-4. **Export**: generates every certificate and combines them into a single multi-page Word (`.docx`) file for download (`buildCombinedDocxBlob` in `app.js`). Optionally, running the local server (`node server.js`) exposes `POST /api/convert`, which converts a batch of DOCX files to pixel-faithful PDFs using Microsoft Word's own COM automation (`convert-docx-to-pdf.ps1`) — this requires Windows with Microsoft Word installed.
+4. **Export**: generates every certificate and combines them into a single multi-page Word (`.docx`) file for download (`buildCombinedDocxBlob` in `app.js`). The file is named `"{file number} {author list}"` — e.g. `17 Author1, Author2.docx` (`buildCombinedFilename`). The file number is omitted if it isn't available in the active mode. Optionally, running the local server (`node server.js`) exposes `POST /api/convert`, which converts a batch of DOCX files to pixel-faithful PDFs using Microsoft Word's own COM automation (`convert-docx-to-pdf.ps1`) — this requires Windows with Microsoft Word installed.
 
 ## Dependencies
 

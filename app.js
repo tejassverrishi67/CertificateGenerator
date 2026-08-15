@@ -15,6 +15,7 @@ const state = {
     docxBuffer: null,        // Raw ArrayBuffer of the selected DOCX template
     templateKey: '',         // Which journal template is currently selected
     buffers: {},             // Cache of already-fetched template ArrayBuffers, keyed by journal
+    doiMode: 'with',         // 'with' = derive everything from the DOI, 'without' = manual entry
     records: [],             // Parsed recipient row data
     authorListLine: ''       // Original (superscript-preserved) author-list text, used in output filenames
 };
@@ -24,6 +25,13 @@ const el = {
     templateStatus: document.getElementById('template-status'),
     dataInput: document.getElementById('data-input'),
     doiInput: document.getElementById('doi-input'),
+    modeToggle: document.getElementById('mode-toggle'),
+    doiFields: document.getElementById('doi-fields'),
+    manualFields: document.getElementById('manual-fields'),
+    volInput: document.getElementById('vol-input'),
+    issueInput: document.getElementById('issue-input'),
+    fileNumInput: document.getElementById('filenum-input'),
+    yearInput: document.getElementById('year-input'),
     parserStatus: document.getElementById('parser-status'),
     btnLoadDemo: document.getElementById('btn-load-demo'),
     btnGenerateZip: document.getElementById('btn-generate-zip'),
@@ -66,6 +74,27 @@ function setupEventListeners() {
     el.dataInput.addEventListener('input', handleDataInput);
     el.doiInput.addEventListener('input', handleDataInput);
     el.btnGenerateZip.addEventListener('click', handleZipExport);
+
+    el.modeToggle.addEventListener('click', (e) => {
+        const btn = e.target.closest('.mode-btn');
+        if (btn) setDoiMode(btn.dataset.mode);
+    });
+    [el.volInput, el.issueInput, el.fileNumInput, el.yearInput].forEach(input => {
+        input.addEventListener('input', handleDataInput);
+    });
+}
+
+// Switch between deriving publication details from a DOI and entering them by hand.
+function setDoiMode(mode) {
+    state.doiMode = mode === 'without' ? 'without' : 'with';
+
+    el.modeToggle.querySelectorAll('.mode-btn').forEach(btn => {
+        btn.classList.toggle('active', btn.dataset.mode === state.doiMode);
+    });
+    el.doiFields.hidden = state.doiMode !== 'with';
+    el.manualFields.hidden = state.doiMode !== 'without';
+
+    handleDataInput();
 }
 
 // Load Example Data
@@ -311,19 +340,15 @@ function parseDataInput(text) {
         }
     });
 
-    // Map DOI (from the dedicated DOI input field, constant applied to all certificates),
-    // plus the Volume/Issue/Year/Month it encodes.
-    const doiValue = el.doiInput.value.trim();
-    const doiParts = parseDoiParts(doiValue);
-    if (doiValue) {
-        records.forEach(record => {
-            record.DOI = doiValue;
-            record.Volume = doiParts.vol;
-            record.Issue = doiParts.issue;
-            record.Year = doiParts.year;
-            record.Month = doiParts.month;
-        });
-    }
+    // Apply the publication details (DOI-derived or hand-entered) as constants to every certificate.
+    const pub = getPublicationInfo();
+    records.forEach(record => {
+        record.DOI = pub.doi;
+        record.Volume = pub.vol;
+        record.Issue = pub.issue;
+        record.Year = pub.year;
+        record.Month = pub.month;
+    });
 
     return records;
 }
@@ -390,18 +415,38 @@ function parseDoiParts(doi) {
     };
 }
 
-// Build the per-certificate output filename (without extension):
-// "{paperNumber} {full author-list line} {certIndex}" when a DOI is provided,
-// otherwise "{full author-list line} {certIndex}".
-function buildOutputFilename(index) {
-    const paperNumber = extractPaperNumber(el.doiInput.value.trim());
-    const parts = [];
-    if (paperNumber) parts.push(paperNumber);
-    if (state.authorListLine) parts.push(state.authorListLine);
-    parts.push(String(index + 1));
+// The single source of truth for volume/issue/year/month/file number, resolved from whichever
+// input mode is active. In "with DOI" mode everything is decoded from the DOI; in "without DOI"
+// mode the user supplies volume, issue, file number and year by hand. The issue number sets the
+// month in both modes, so that rule never has to be restated by the user.
+function getPublicationInfo() {
+    if (state.doiMode === 'with') {
+        const doi = el.doiInput.value.trim();
+        const parts = parseDoiParts(doi);
+        return { doi, ...parts, fileNumber: extractPaperNumber(doi) };
+    }
 
-    let name = parts.join(' ').trim();
-    if (!name) name = `certificate_${index + 1}`;
+    const issueNum = parseInt(el.issueInput.value.trim(), 10);
+    return {
+        doi: '',
+        vol: el.volInput.value.trim(),
+        issue: isNaN(issueNum) ? '' : String(issueNum),
+        year: el.yearInput.value.trim(),
+        month: MONTH_NAMES[issueNum - 1] || '',
+        fileNumber: el.fileNumInput.value.trim()
+    };
+}
+
+// Build the output filename (without extension) for the combined Word file:
+// "{fileNumber} {full author-list line}", e.g. "17 Author1, Author2". The file number comes from
+// the DOI or the manual field depending on the active mode, and is omitted when not available.
+function buildCombinedFilename() {
+    const { fileNumber } = getPublicationInfo();
+    const parts = [];
+    if (fileNumber) parts.push(fileNumber);
+    if (state.authorListLine) parts.push(state.authorListLine);
+
+    const name = parts.join(' ').trim() || 'certificates';
     // Only strip characters that are actually invalid in filenames; keep spaces, commas, superscripts.
     return name.replace(/[\\/:*?"<>|]/g, '_');
 }
@@ -531,11 +576,11 @@ async function handleZipExport() {
     try {
         log(`Generating ${state.records.length} certificate(s) into a single Word document...`, 'system');
         const combinedBlob = buildCombinedDocxBlob(state.records);
-        const fileName = state.records.length === 1 ? buildOutputFilename(0) : (state.authorListLine || 'certificates');
+        const fileName = buildCombinedFilename();
 
         const link = document.createElement('a');
         link.href = URL.createObjectURL(combinedBlob);
-        link.download = `${fileName.replace(/[\\/:*?"<>|]/g, '_')}.docx`;
+        link.download = `${fileName}.docx`;
         document.body.appendChild(link);
         link.click();
         document.body.removeChild(link);

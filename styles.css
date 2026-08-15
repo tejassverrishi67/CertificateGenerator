@@ -236,6 +236,63 @@ body {
     color: var(--text-muted, #888);
 }
 
+/* With DOI / Without DOI mode switch */
+.mode-toggle {
+    display: flex;
+    gap: 0.35rem;
+    padding: 0.25rem;
+    margin-bottom: 0.85rem;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background-color: var(--bg-input);
+}
+
+.mode-btn {
+    flex: 1;
+    padding: 0.5rem 0.75rem;
+    border: none;
+    border-radius: 6px;
+    background: transparent;
+    color: var(--text-muted);
+    font-family: inherit;
+    font-size: 0.8rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.mode-btn:hover {
+    color: var(--text);
+}
+
+.mode-btn.active {
+    background-color: var(--accent);
+    color: #fff;
+}
+
+/* Manual volume / issue / file number / year entry */
+.manual-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 0.7rem;
+}
+
+.manual-grid label {
+    display: flex;
+    flex-direction: column;
+    gap: 0.35rem;
+    font-size: 0.72rem;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+}
+
+.manual-grid .hint {
+    grid-column: 1 / -1;
+    margin-top: 0;
+}
+
 /* Buttons */
 .btn {
     display: inline-flex;

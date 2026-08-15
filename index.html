@@ -73,10 +73,25 @@
                 <div class="card">
                     <div class="card-header">
                         <i class="fa-solid fa-link"></i>
-                        <h2>3. DOI (Optional)</h2>
+                        <h2>3. Publication Details</h2>
                     </div>
-                    <input type="text" id="doi-input" class="doi-field" placeholder="e.g. 10.1234/example.2026.00001">
-                    <p class="hint">Volume, Issue, Year and Month are all extracted automatically from the DOI — the issue number is the month (e.g. ...2026.15817 → Vol 15, Issue 8, Year 2026, August).</p>
+                    <div class="mode-toggle" id="mode-toggle">
+                        <button type="button" class="mode-btn active" data-mode="with">With DOI</button>
+                        <button type="button" class="mode-btn" data-mode="without">Without DOI</button>
+                    </div>
+
+                    <div id="doi-fields">
+                        <input type="text" id="doi-input" class="doi-field" placeholder="e.g. 10.1234/example.2026.15817">
+                        <p class="hint">Volume, Issue, Year, Month and the file number are all extracted automatically from the DOI — the issue number is the month (e.g. ...2026.15817 → Vol 15, Issue 8, Year 2026, August, file 17).</p>
+                    </div>
+
+                    <div id="manual-fields" class="manual-grid" hidden>
+                        <label>Volume<input type="text" id="vol-input" class="doi-field" placeholder="15"></label>
+                        <label>Issue<input type="text" id="issue-input" class="doi-field" placeholder="8"></label>
+                        <label>File number<input type="text" id="filenum-input" class="doi-field" placeholder="17"></label>
+                        <label>Year<input type="text" id="year-input" class="doi-field" placeholder="2026"></label>
+                        <p class="hint">The issue number sets the month (8 → August). The file number is used as the filename prefix.</p>
+                    </div>
                 </div>
 
                 <div class="card action-card">
