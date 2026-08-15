@@ -1,46 +1,41 @@
-// Zero-Styling Certificate Generator Logic (PDF & DOCX Support)
+// Zero-Styling Certificate Generator Logic (DOCX template -> DOCX + PDF rendered from that DOCX)
 
 const state = {
-    fileType: null,          // 'pdf' or 'docx'
-    templateBuffer: null,    // Raw ArrayBuffer of template
-    pdfDoc: null,            // Loaded PDFJS Document
-    viewport: null,          // Page Viewport
-    page: null,              // PDFJS Page 1 Object
-    placeholders: {},        // { NAME: {...}, Designation: {...}, PaperTitle: {...}, DOI: {...} }
+    docxLoaded: false,       // Whether a DOCX template has been loaded
+    docxBuffer: null,        // Raw ArrayBuffer of the DOCX template
     records: [],             // Parsed recipient row data
-    canvasCache: null,       // Offscreen cached canvas with rendered PDF page
-    currentPreviewIndex: 0
+    authorListLine: ''       // Original (superscript-preserved) author-list text, used in output filenames
 };
 
 const el = {
-    uploadZone: document.getElementById('upload-zone'),
-    templateUpload: document.getElementById('template-upload'),
-    fileName: document.getElementById('file-name'),
+    uploadZoneDocx: document.getElementById('upload-zone-docx'),
+    docxUpload: document.getElementById('docx-upload'),
+    docxFileName: document.getElementById('docx-file-name'),
     dataInput: document.getElementById('data-input'),
+    doiInput: document.getElementById('doi-input'),
     parserStatus: document.getElementById('parser-status'),
     btnLoadDemo: document.getElementById('btn-load-demo'),
     btnGenerateZip: document.getElementById('btn-generate-zip'),
-    btnGeneratePdf: document.getElementById('btn-generate-pdf'),
-    logsContainer: document.getElementById('logs-container'),
-    previewCard: document.getElementById('preview-card'),
-    previewCanvas: document.getElementById('preview-canvas'),
-    previewIndex: document.getElementById('preview-index'),
-    btnPrevPage: document.getElementById('btn-prev-page'),
-    btnNextPage: document.getElementById('btn-next-page'),
-    docxPreviewMsg: document.getElementById('docx-preview-msg')
+    logsContainer: document.getElementById('logs-container')
 };
 
 // Logger utility
 function log(msg, type = 'system') {
     const entry = document.createElement('div');
     entry.className = `log-entry ${type}`;
-    
+
     let icon = 'fa-info-circle';
     if (type === 'success') icon = 'fa-circle-check';
     if (type === 'error') icon = 'fa-circle-exclamation';
     if (type === 'info') icon = 'fa-magnifying-glass';
-    
-    entry.innerHTML = `<i class="fa-solid ${icon}"></i> <span>${msg}</span>`;
+
+    const iconEl = document.createElement('i');
+    iconEl.className = `fa-solid ${icon}`;
+    const textEl = document.createElement('span');
+    textEl.textContent = msg;
+    entry.appendChild(iconEl);
+    entry.appendChild(document.createTextNode(' '));
+    entry.appendChild(textEl);
     el.logsContainer.appendChild(entry);
     el.logsContainer.scrollTop = el.logsContainer.scrollHeight;
 }
@@ -51,322 +46,88 @@ function init() {
 }
 
 function setupEventListeners() {
-    el.uploadZone.addEventListener('click', () => el.templateUpload.click());
-    el.templateUpload.addEventListener('change', handleFileSelect);
-    
-    el.uploadZone.addEventListener('dragover', (e) => {
-        e.preventDefault();
-        el.uploadZone.classList.add('dragover');
-    });
-    el.uploadZone.addEventListener('dragleave', () => {
-        el.uploadZone.classList.remove('dragover');
-    });
-    el.uploadZone.addEventListener('drop', (e) => {
-        e.preventDefault();
-        el.uploadZone.classList.remove('dragover');
-        if (e.dataTransfer.files.length > 0) {
-            el.templateUpload.files = e.dataTransfer.files;
-            handleFileSelect();
-        }
-    });
+    setupUploadZone(el.uploadZoneDocx, el.docxUpload, handleDocxFileSelect);
 
     el.btnLoadDemo.addEventListener('click', loadDemoData);
     el.dataInput.addEventListener('input', handleDataInput);
+    el.doiInput.addEventListener('input', handleDataInput);
     el.btnGenerateZip.addEventListener('click', handleZipExport);
-    el.btnGeneratePdf.addEventListener('click', generateCombinedPDF);
-    
-    el.btnPrevPage.addEventListener('click', () => navigatePreview(-1));
-    el.btnNextPage.addEventListener('click', () => navigatePreview(1));
+}
+
+function setupUploadZone(zoneEl, inputEl, onFile) {
+    zoneEl.addEventListener('click', () => inputEl.click());
+    inputEl.addEventListener('change', () => {
+        if (inputEl.files.length > 0) onFile(inputEl.files[0]);
+    });
+
+    zoneEl.addEventListener('dragover', (e) => {
+        e.preventDefault();
+        zoneEl.classList.add('dragover');
+    });
+    zoneEl.addEventListener('dragleave', () => {
+        zoneEl.classList.remove('dragover');
+    });
+    zoneEl.addEventListener('drop', (e) => {
+        e.preventDefault();
+        zoneEl.classList.remove('dragover');
+        if (e.dataTransfer.files.length > 0) {
+            inputEl.files = e.dataTransfer.files;
+            onFile(e.dataTransfer.files[0]);
+        }
+    });
 }
 
 // Load Example Data
 function loadDemoData() {
     const demo = [
-        'A STUDY ON RECRUITMENT METRICS AND THEIR IMPACT ON ORGANIZATIONAL EFFICIENCY',
-        'Mr.AJAYRATHNA S1, Ms.GAYATHRI M2',
-        'Assistant Professor, Department of Management Studies, EGS Pillay Engineering College, Nagapattinam, Tamilnadu, India1',
-        'MBA Student, Department of Management Studies, EGS Pillay Engineering College, Nagapattinam, Tamilnadu, India2',
-        '13706'
+        'A Study on Sample Data Processing Techniques',
+        'Mr.JOHN SMITH1, Ms.JANE DOE2',
+        'Assistant Professor, Department of Computer Science, Example Institute of Technology, Example City, Example State, Example Country1',
+        'Student, Department of Computer Science, Example Institute of Technology, Example City, Example State, Example Country2'
     ].join('\n');
     el.dataInput.value = demo;
+    el.doiInput.value = '10.9999/example.2026.00001';
     handleDataInput();
 }
 
-// 1. Load Template File (PDF or DOCX)
-function handleFileSelect() {
-    const file = el.templateUpload.files[0];
+// 1. Load Template File (DOCX)
+function handleDocxFileSelect(file) {
     if (!file) return;
-
-    el.fileName.textContent = file.name;
-    const extension = file.name.split('.').pop().toLowerCase();
-    state.fileType = extension;
-    
-    log(`Loading ${extension.toUpperCase()} file: ${file.name}...`, 'system');
+    el.docxFileName.textContent = file.name;
+    log(`Loading DOCX file: ${file.name}...`, 'system');
 
     const reader = new FileReader();
-    reader.onload = async function(e) {
-        state.templateBuffer = e.target.result;
-        
-        if (extension === 'docx') {
-            log(`Word Document (DOCX) loaded successfully.`, 'success');
-            setupDocxWorkflow();
-        } else if (extension === 'pdf') {
-            try {
-                const loadingTask = pdfjsLib.getDocument({ data: state.templateBuffer });
-                state.pdfDoc = await loadingTask.promise;
-                log(`PDF loaded. Total Pages: ${state.pdfDoc.numPages}`, 'success');
-                await analyzePDFTemplatePage(1);
-            } catch (err) {
-                log(`Error reading PDF: ${err.message}`, 'error');
-                console.error(err);
-            }
-        } else {
-            log(`Unsupported file type. Please upload a PDF or DOCX template.`, 'error');
-        }
+    reader.onload = function(e) {
+        state.docxBuffer = e.target.result;
+        state.docxLoaded = true;
+        log(`Word Document (DOCX) loaded successfully.`, 'success');
+        log(`Format mappings to replace {NAME}, {Designation}, {PaperTitle}, and {DOI} tags inside your Word document.`, 'info');
+        handleDataInput();
     };
     reader.readAsArrayBuffer(file);
-}
-
-// DOCX Flow Setup
-function setupDocxWorkflow() {
-    el.docxPreviewMsg.style.display = 'block';
-    el.previewCanvas.style.display = 'none';
-    el.previewCard.style.display = 'block';
-    
-    // DOCX outputs are ZIP archives of individual documents
-    el.btnGeneratePdf.style.display = 'none'; // DOCX doesn't support combined PDF directly
-    el.btnGenerateZip.innerHTML = '<i class="fa-solid fa-file-zipper"></i> Download ZIP (Individual DOCX Files)';
-    
-    log(`DOCX Mode Ready. Format mappings to replace {NAME}, {Designation}, {PaperTitle}, and {DOI} tags inside your Word document.`, 'info');
-    handleDataInput();
-}
-
-// 2. Scan PDF Text Layer for Placeholders
-async function analyzePDFTemplatePage(pageNum) {
-    try {
-        el.docxPreviewMsg.style.display = 'none';
-        el.previewCanvas.style.display = 'block';
-        el.btnGeneratePdf.style.display = 'inline-flex';
-        el.btnGenerateZip.innerHTML = '<i class="fa-solid fa-file-zipper"></i> Download ZIP (Individual PDFs)';
-        
-        log(`Analyzing text layout on Page ${pageNum}...`, 'info');
-        state.page = await state.pdfDoc.getPage(pageNum);
-        state.viewport = state.page.getViewport({ scale: 2.5 });
-        
-        // Cache rendered base page
-        state.canvasCache = document.createElement('canvas');
-        state.canvasCache.width = state.viewport.width;
-        state.canvasCache.height = state.viewport.height;
-        const ctx = state.canvasCache.getContext('2d');
-        
-        log(`Rendering base template canvas...`, 'system');
-        await state.page.render({ canvasContext: ctx, viewport: state.viewport }).promise;
-        
-        // Scan text items
-        const textContent = await state.page.getTextContent();
-        
-        // Map transform coordinates to viewport coordinates
-        const transformedItems = textContent.items.map(item => {
-            const tx = pdfjsLib.Util.transform(state.viewport.transform, item.transform);
-            const fontSize = Math.sqrt(tx[2]*tx[2] + tx[3]*tx[3]);
-            return {
-                str: item.str,
-                fontName: item.fontName,
-                x: tx[4],
-                y: tx[5], // baseline
-                width: item.width * (tx[0] / item.transform[0] || state.viewport.scale),
-                height: fontSize,
-                item: item
-            };
-        });
-
-        // Filter items with braces
-        const braceItems = transformedItems.filter(item => {
-            const s = item.str;
-            return s.includes('{') || s.includes('}') || s.includes('[') || s.includes(']');
-        });
-
-        // Explicitly sort brace items left-to-right (horizontal reading order)
-        braceItems.sort((a, b) => {
-            const yDiff = Math.abs(a.y - b.y);
-            if (yDiff < Math.min(a.height, b.height) * 0.8) {
-                return a.x - b.x; // same line, sort left-to-right
-            }
-            return a.y - b.y; // sort top-to-bottom
-        });
-
-        // Merge adjacent placeholders on the same horizontal line (e.g. {Paper and Title})
-        const merged = [];
-        braceItems.forEach(item => {
-            if (merged.length > 0) {
-                const last = merged[merged.length - 1];
-                const yDiff = Math.abs(item.y - last.y);
-                const xDiff = item.x - (last.x + last.width);
-                if (yDiff < last.height * 0.8 && xDiff >= -10 && xDiff < 75) {
-                    last.str += ' ' + item.str;
-                    last.width = (item.x + item.width) - last.x;
-                    last.height = Math.max(last.height, item.height);
-                    return;
-                }
-            }
-            merged.push({ ...item });
-        });
-
-        // Classify standard target placeholders
-        state.placeholders = {
-            NAME: null,
-            Designation: null,
-            PaperTitle: null,
-            DOI: null
-        };
-
-        merged.forEach(ph => {
-            const text = ph.str.toLowerCase();
-            if (text.includes('name')) {
-                state.placeholders.NAME = ph;
-            } else if (text.includes('designation')) {
-                state.placeholders.Designation = ph;
-            } else if (text.includes('paper') || text.includes('title')) {
-                state.placeholders.PaperTitle = ph;
-            } else if (text.includes('doi')) {
-                state.placeholders.DOI = ph;
-            }
-        });
-
-        // Log results
-        const detected = [];
-        Object.keys(state.placeholders).forEach(key => {
-            if (state.placeholders[key]) {
-                detected.push(`{${key}}`);
-            }
-        });
-
-        if (detected.length > 0) {
-            log(`Placeholders detected: ${detected.join(', ')}`, 'success');
-            
-            // Sample styles and background colors
-            sampleStylesAndColors(ctx);
-            
-            // Parse inputs & enable generate
-            handleDataInput();
-        } else {
-            log(`No placeholders found containing '{...}' format.`, 'error');
-            toggleButtons(false);
-        }
-    } catch (err) {
-        log(`Failed template analysis: ${err.message}`, 'error');
-        console.error(err);
-    }
 }
 
 // Helper to disable/enable export buttons
 function toggleButtons(enabled) {
     el.btnGenerateZip.disabled = !enabled;
-    if (state.fileType === 'pdf') {
-        el.btnGeneratePdf.disabled = !enabled;
-    } else {
-        el.btnGeneratePdf.disabled = true;
-    }
 }
 
-// 3. Extract Styles (Original Fonts, Colors, Background Sample)
-function sampleStylesAndColors(ctx) {
-    Object.keys(state.placeholders).forEach(key => {
-        const ph = state.placeholders[key];
-        if (!ph) return;
-
-        // A. Sample local background just above placeholder text
-        const localX = Math.round(ph.x + ph.width / 2);
-        const localY = Math.max(5, Math.round(ph.y - ph.height - 5));
-        const localPixel = ctx.getImageData(localX, localY, 1, 1).data;
-        ph.localBG = `rgb(${localPixel[0]}, ${localPixel[1]}, ${localPixel[2]})`;
-
-        // B. Sample original text color (max deviation from local background)
-        const pad = 1;
-        const scanX = Math.round(ph.x) + pad;
-        const scanY = Math.round(ph.y - ph.height) + pad;
-        const scanW = Math.round(ph.width) - (pad * 2);
-        const scanH = Math.round(ph.height) - (pad * 2);
-        
-        let textColor = 'rgb(0,0,0)';
-        if (scanW > 0 && scanH > 0) {
-            const imgData = ctx.getImageData(scanX, scanY, scanW, scanH);
-            const pixels = imgData.data;
-            let maxDist = -1;
-            let bestRGB = [0, 0, 0];
-
-            for (let i = 0; i < pixels.length; i += 4) {
-                const r = pixels[i];
-                const g = pixels[i+1];
-                const b = pixels[i+2];
-                const a = pixels[i+3];
-                if (a < 100) continue;
-
-                const dist = Math.abs(r - localPixel[0]) + Math.abs(g - localPixel[1]) + Math.abs(b - localPixel[2]);
-                if (dist > maxDist) {
-                    maxDist = dist;
-                    bestRGB = [r, g, b];
-                }
-            }
-            textColor = `rgb(${bestRGB[0]}, ${bestRGB[1]}, ${bestRGB[2]})`;
-        }
-
-        // C. Contrast Fallback: If text color matches the background color too closely, use a dark fallback
-        const localBGStr = ph.localBG;
-        const dev = getRGBColorDev(textColor, localBGStr);
-        if (dev < 120) {
-            textColor = 'rgb(6, 26, 56)'; // default dark blue
-        }
-
-        ph.textColor = textColor;
-        log(`Extracted style for {${key}}: Size ${Math.round(ph.height)}px, Font: ${ph.fontName}, Color: ${ph.textColor}`, 'system');
-    });
-
-    // Make sure contrast fallbacks resolve if NAME itself is correct
-    if (state.placeholders.NAME && state.placeholders.NAME.textColor) {
-        Object.keys(state.placeholders).forEach(key => {
-            const ph = state.placeholders[key];
-            if (!ph) return;
-            const dev = getRGBColorDev(ph.textColor, ph.localBG);
-            if (dev < 120) {
-                ph.textColor = state.placeholders.NAME.textColor;
-            }
-        });
-    }
-}
-
-// Contrast helper
-function getRGBColorDev(color1Str, color2Str) {
-    const parse = c => {
-        const m = c.match(/\d+/g);
-        return m ? m.map(Number) : [0,0,0];
-    };
-    const c1 = parse(color1Str);
-    const c2 = parse(color2Str);
-    return Math.abs(c1[0] - c2[0]) + Math.abs(c1[1] - c2[1]) + Math.abs(c1[2] - c2[2]);
-}
-
-// 4. Data Inputs Parser
+// 2. Data Inputs Parser
 function handleDataInput() {
     const text = el.dataInput.value.trim();
     if (!text) {
         state.records = [];
         el.parserStatus.textContent = 'No data input';
         toggleButtons(false);
-        el.previewCard.style.display = 'none';
         return;
     }
 
     try {
         state.records = parseDataInput(text);
         el.parserStatus.textContent = `${state.records.length} records parsed successfully`;
-        
-        const hasTemplate = state.fileType === 'docx' || (state.pdfDoc && Object.values(state.placeholders).some(p => p !== null));
-        if (hasTemplate) {
+
+        if (state.docxLoaded) {
             toggleButtons(true);
-            state.currentPreviewIndex = 0;
-            el.previewCard.style.display = 'block';
-            updatePreview();
         }
     } catch (err) {
         el.parserStatus.textContent = `Parse error: ${err.message}`;
@@ -375,68 +136,74 @@ function handleDataInput() {
 }
 
 function parseMappingLine(line) {
+    // Split on commas, then reassemble: a piece with no trailing digit suffix continues
+    // the current value (values may legitimately contain commas, e.g. "Dept, City, Country1-2").
+    // A piece that is PURELY numeric/range (e.g. "2", "3-4") is an additional suffix for the
+    // most recent item, supporting discontinuous suffix lists like "India1,2,3".
+    const pieces = line.split(',').map(p => p.trim());
     const items = [];
-    let currentStart = 0;
-    
-    for (let i = 0; i < line.length; i++) {
-        if (line[i] === ',') {
-            // Check if this comma is immediately preceded by a numeric suffix (e.g., "...1,")
-            const beforeComma = line.substring(currentStart, i).trim();
-            const match = beforeComma.match(/\d+(?:-\d+)?$/);
-            if (match) {
-                const val = beforeComma.substring(0, match.index).trim();
-                const suffix = match[0];
-                items.push({ val, suffix });
-                currentStart = i + 1;
-            }
-        }
-    }
-    
-    // Handle last item
-    const lastItem = line.substring(currentStart).trim();
-    if (lastItem) {
-        const match = lastItem.match(/\d+(?:-\d+)?$/);
-        if (match) {
-            const val = lastItem.substring(0, match.index).trim();
-            const suffix = match[0];
-            items.push({ val, suffix });
-        }
-    }
-    return items;
-}
+    let bufferVal = null;
 
-function parseDataInput(text) {
-    const lines = text.split('\n').map(l => l.trim()).filter(l => l.length > 0);
-    
-    // Classify lines dynamically
-    const classification = {
-        NAME: [],
-        Designation: [],
-        PaperTitle: [],
-        DOI: []
-    };
+    pieces.forEach(piece => {
+        if (!piece) return;
 
-    lines.forEach(line => {
-        const trimmed = line.trim();
-        if (!trimmed) return;
-
-        // 1. DOI Classify
-        if (/^\d+$/.test(trimmed) || trimmed.startsWith('10.') || (trimmed.length < 25 && trimmed.includes('.'))) {
-            classification.DOI.push(trimmed);
+        if (/^\d+(?:-\d+)?$/.test(piece) && items.length > 0) {
+            items[items.length - 1].suffix += ',' + piece;
             return;
         }
 
-        // 2. Name Classify (e.g. contains Mr/Ms prefix, or multiple comma items with numeric suffixes)
+        const match = piece.match(/\d+(?:-\d+)?$/);
+        if (match) {
+            const val = piece.substring(0, match.index).trim();
+            const suffix = match[0];
+            const fullVal = bufferVal ? `${bufferVal}, ${val}` : val;
+            items.push({ val: fullVal, suffix });
+            bufferVal = null;
+        } else {
+            bufferVal = bufferVal ? `${bufferVal}, ${piece}` : piece;
+        }
+    });
+
+    return items;
+}
+
+// Convert superscript numeral characters (e.g. "Name¹²") to plain ASCII digits ("Name12")
+const SUPERSCRIPT_MAP = { '⁰': '0', '¹': '1', '²': '2', '³': '3', '⁴': '4', '⁵': '5', '⁶': '6', '⁷': '7', '⁸': '8', '⁹': '9' };
+function normalizeSuperscripts(text) {
+    return text.replace(/[⁰¹²³⁴⁵⁶⁷⁸⁹]/g, ch => SUPERSCRIPT_MAP[ch]);
+}
+
+function parseDataInput(text) {
+    // Keep original (pre-normalization) lines alongside normalized ones so the original
+    // superscript-formatted author list can be reused verbatim (e.g. for output filenames),
+    // while suffix/index parsing runs against the ASCII-digit normalized copy.
+    const origLines = text.split('\n').map(l => l.trim()).filter(l => l.length > 0);
+    const normLines = origLines.map(normalizeSuperscripts);
+
+    // Classify lines dynamically
+    const classification = {
+        NAME: [],          // normalized text, used for suffix/index parsing
+        NAME_ORIGINAL: [],  // original text (superscripts preserved), used for display/filenames
+        Designation: [],
+        PaperTitle: []
+    };
+
+    normLines.forEach((line, i) => {
+        const trimmed = line.trim();
+        if (!trimmed) return;
+
+        // 1. Name Classify (e.g. contains Mr/Ms prefix, or multiple comma items with numeric suffixes)
         const isNameList = trimmed.includes('Mr.') || trimmed.includes('Ms.') || trimmed.includes('Mrs.') || trimmed.includes('Dr.');
         const parsed = parseMappingLine(trimmed);
         const allShort = parsed.length > 0 && parsed.every(item => item.val.length < 25);
         if (isNameList || (parsed.length > 1 && allShort)) {
             classification.NAME.push(trimmed);
+            classification.NAME_ORIGINAL.push(origLines[i]);
             return;
         }
 
-        // 3. Designation Classify (contains academic/corporate keywords)
-        const keywords = ['student', 'professor', 'lecturer', 'department', 'college', 'university', 'researcher', 'studies', 'faculty', 'nagapattinam', 'nagapatnam', 'tamilnadu', 'tamil nadu', 'india', 'scholar'];
+        // 2. Designation Classify (contains academic/corporate keywords)
+        const keywords = ['student', 'professor', 'lecturer', 'department', 'college', 'university', 'researcher', 'studies', 'faculty', 'india', 'scholar'];
         const lower = trimmed.toLowerCase();
         const hasKeyword = keywords.some(kw => lower.includes(kw));
         if (hasKeyword) {
@@ -444,7 +211,7 @@ function parseDataInput(text) {
             return;
         }
 
-        // 4. Default to Paper Title
+        // 3. Default to Paper Title
         classification.PaperTitle.push(trimmed);
     });
 
@@ -452,6 +219,9 @@ function parseDataInput(text) {
     if (classification.NAME.length === 0) {
         throw new Error("Could not detect any Name line containing certificate mapping suffixes (e.g., Name1, Name2).");
     }
+
+    // Store the original (superscript-preserved) author-list line(s) for filename generation
+    state.authorListLine = classification.NAME_ORIGINAL.join(', ');
 
     // Parse names to determine maxIdx
     const nameItems = [];
@@ -517,9 +287,9 @@ function parseDataInput(text) {
         }
     });
 
-    // Map DOI (constant applied directly to all certificates)
-    if (classification.DOI.length > 0) {
-        const doiValue = classification.DOI[0];
+    // Map DOI (from the dedicated DOI input field, constant applied to all certificates)
+    const doiValue = el.doiInput.value.trim();
+    if (doiValue) {
         records.forEach(record => {
             record.DOI = doiValue;
         });
@@ -530,322 +300,159 @@ function parseDataInput(text) {
 
 function parseSuffix(suffix) {
     const indexes = [];
-    if (suffix.includes('-')) {
-        const parts = suffix.split('-');
-        const start = parseInt(parts[0], 10);
-        const end = parseInt(parts[1], 10);
-        if (!isNaN(start) && !isNaN(end)) {
-            for (let i = start; i <= end; i++) {
-                indexes.push(i);
+    // Supports comma-separated lists of numbers and/or ranges, e.g. "1,3-5,7"
+    suffix.split(',').forEach(part => {
+        part = part.trim();
+        if (!part) return;
+        if (part.includes('-')) {
+            const parts = part.split('-');
+            const start = parseInt(parts[0], 10);
+            const end = parseInt(parts[1], 10);
+            if (!isNaN(start) && !isNaN(end)) {
+                for (let i = start; i <= end; i++) {
+                    indexes.push(i);
+                }
+            }
+        } else {
+            const idx = parseInt(part, 10);
+            if (!isNaN(idx)) {
+                indexes.push(idx);
             }
         }
-    } else {
-        const idx = parseInt(suffix, 10);
-        if (!isNaN(idx)) {
-            indexes.push(idx);
-        }
-    }
+    });
     return indexes;
 }
 
-// 5. Render PDF Certificate Canvas
-function renderCertificateCanvas(recordIdx, targetCanvas) {
-    return new Promise((resolve) => {
-        const record = state.records[recordIdx];
-        
-        // Match canvas dimensions
-        targetCanvas.width = state.canvasCache.width;
-        targetCanvas.height = state.canvasCache.height;
-        const ctx = targetCanvas.getContext('2d');
-        
-        // 1. Draw cached original template drawing
-        ctx.drawImage(state.canvasCache, 0, 0);
+// Extract the journal "file number" from a DOI, e.g. "10.17148/IJARCCE.2026.15817" -> "17"
+// (the last 2 digits of the final numeric segment: VOLUME(15) + ISSUE(8) + FILE(17)).
+function extractPaperNumber(doi) {
+    if (!doi) return '';
+    const runs = doi.match(/\d+/g);
+    if (!runs || runs.length === 0) return '';
+    return runs[runs.length - 1].slice(-2);
+}
 
-        // Wait for fonts to be ready in the document
-        document.fonts.ready.then(() => {
-            // 2. Perform style-perfect replacements
-            Object.keys(state.placeholders).forEach(key => {
-                const ph = state.placeholders[key];
-                if (!ph) return;
+// Build the per-certificate output filename (without extension):
+// "{paperNumber} {full author-list line} {certIndex}" when a DOI is provided,
+// otherwise "{full author-list line} {certIndex}".
+function buildOutputFilename(index) {
+    const paperNumber = extractPaperNumber(el.doiInput.value.trim());
+    const parts = [];
+    if (paperNumber) parts.push(paperNumber);
+    if (state.authorListLine) parts.push(state.authorListLine);
+    parts.push(String(index + 1));
 
-                // A. Cover-up background color rect (extending below baseline for descenders/shadows)
-                ctx.fillStyle = ph.localBG;
-                const padX = Math.max(16, ph.width * 0.18);
-                const padY = Math.max(6, ph.height * 0.15);
-                ctx.fillRect(ph.x - padX, ph.y - ph.height - padY, ph.width + (padX * 2), ph.height + (padY * 3.5));
+    let name = parts.join(' ').trim();
+    if (!name) name = `certificate_${index + 1}`;
+    // Only strip characters that are actually invalid in filenames; keep spaces, commas, superscripts.
+    return name.replace(/[\\/:*?"<>|]/g, '_');
+}
 
-                // B. Prepare replacement text value
-                let val = record[key] || '';
-                let drawText = val;
-                
-                // Specific DOI prefix merge formatting (to avoid duplicate prefixes)
-                if (key === 'DOI' && val) {
-                    const originalStr = ph.str; // e.g. "{DOI}"
-                    const cleanVal = val.replace(/^(doi\s*)?10\.17148\/iarjset\.2026\./i, '');
-                    
-                    if (originalStr.includes('{') || originalStr.includes('}')) {
-                        drawText = originalStr.replace(/\{doi\}/i, cleanVal);
-                    } else {
-                        drawText = cleanVal;
-                    }
-                }
+// 3. Generate a filled DOCX package (PizZip instance) for one record
+function renderDocxZipForRecord(record) {
+    const docZip = new window.PizZip(state.docxBuffer);
+    const doc = new window.docxtemplater(docZip, {
+        paragraphLoop: true,
+        linebreaks: true,
+    });
 
-                // C. Name formatting: MUST be uppercase & styled in a bold serif with a subtle stroke & shadow
-                ctx.save();
-                ctx.textAlign = 'center';
-                ctx.textBaseline = 'alphabetic';
+    // Map data (support both space, no space, underscore, and case variants for absolute safety)
+    doc.setData({
+        NAME: record.NAME ? record.NAME.toUpperCase() : '',
+        name: record.NAME ? record.NAME.toUpperCase() : '',
+        Designation: record.Designation || '',
+        designation: record.Designation || '',
+        "Paper Title": record.PaperTitle || '',
+        "paper title": record.PaperTitle || '',
+        PaperTitle: record.PaperTitle || '',
+        papertitle: record.PaperTitle || '',
+        DOI: record.DOI || '',
+        doi: record.DOI || ''
+    });
 
-                const centerX = ph.x + ph.width / 2;
-                const baselineY = ph.y;
+    doc.render();
 
-                if (key === 'NAME') {
-                    drawText = drawText.toUpperCase();
-                    
-                    // Style matching for IARJSET journal expected style: Bold Serif with shadows
-                    ctx.font = `bold ${ph.height}px "Playfair Display", "Cinzel", "Georgia", serif`;
-                    
-                    // Draw a subtle text outline shadow
-                    ctx.shadowColor = 'rgba(0, 0, 0, 0.25)';
-                    ctx.shadowBlur = 4;
-                    ctx.shadowOffsetX = 2;
-                    ctx.shadowOffsetY = 2;
+    return doc.getZip();
+}
 
-                    // Draw filled text
-                    ctx.fillStyle = '#061b38'; // Dark blue
-                    ctx.fillText(drawText, centerX, baselineY);
-
-                    // Add thin outline strokes for extra pop
-                    ctx.shadowColor = 'transparent'; // turn off shadow for stroke
-                    ctx.strokeStyle = 'rgba(255, 255, 255, 0.4)';
-                    ctx.lineWidth = 1;
-                    ctx.strokeText(drawText, centerX, baselineY);
-                } else if (key === 'PaperTitle') {
-                    // Green bold title
-                    ctx.font = `bold ${ph.height}px "Montserrat", "Inter", sans-serif`;
-                    ctx.fillStyle = '#065f46'; // Beautiful dark green
-                    ctx.fillText(drawText, centerX, baselineY);
-                } else if (key === 'DOI') {
-                    // Brown DOI text
-                    ctx.font = `${ph.height}px "Inter", sans-serif`;
-                    ctx.fillStyle = '#c05621'; // Brown
-                    ctx.fillText(drawText, centerX, baselineY);
-                } else {
-                    // General placeholder style fallback
-                    const cleanFont = ph.fontName.replace(/['"]/g, '');
-                    ctx.font = `${ph.height}px "${cleanFont}", sans-serif`;
-                    ctx.fillStyle = ph.textColor;
-                    ctx.fillText(drawText, centerX, baselineY);
-                }
-                ctx.restore();
-            });
-            
-            resolve(targetCanvas);
-        });
+function renderDocxBlobForRecord(record) {
+    return renderDocxZipForRecord(record).generate({
+        type: "blob",
+        mimeType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
     });
 }
 
-// 6. Navigation Preview
-async function navigatePreview(direction) {
-    if (state.records.length === 0) return;
-    state.currentPreviewIndex = (state.currentPreviewIndex + direction + state.records.length) % state.records.length;
-    await updatePreview();
+// Splice one record's rendered body content (all paragraphs before its <w:sectPr>) into
+// the combined document's body, right before the combined document's own <w:sectPr>,
+// prefixed with a page break. Since every record is rendered from the same template,
+// headers/footers/media/relationship IDs are identical across records, so only the body
+// paragraphs need to be merged.
+function appendRecordToCombinedXml(combinedXml, recordXml) {
+    const sectPrOpenTag = '<w:sectPr';
+    const bodyCloseTag = '</w:body>';
+
+    const recordSectPrIdx = recordXml.lastIndexOf(sectPrOpenTag);
+    const bodyOpenIdx = recordXml.indexOf('<w:body>') + '<w:body>'.length;
+    const recordBodyContent = recordXml.slice(bodyOpenIdx, recordSectPrIdx);
+
+    const pageBreak = '<w:p><w:r><w:br w:type="page"/></w:r></w:p>';
+
+    const combinedSectPrIdx = combinedXml.lastIndexOf(sectPrOpenTag);
+    return (
+        combinedXml.slice(0, combinedSectPrIdx) +
+        pageBreak +
+        recordBodyContent +
+        combinedXml.slice(combinedSectPrIdx)
+    );
 }
 
-async function updatePreview() {
-    el.previewIndex.textContent = `Certificate ${state.currentPreviewIndex + 1} of ${state.records.length}`;
-    if (state.fileType === 'docx') {
-        // Show text-based preview for DOCX
-        const record = state.records[state.currentPreviewIndex];
-        const previewText = `NAME: ${record.NAME ? record.NAME.toUpperCase() : ''}\nDesignation: ${record.Designation || ''}\nPaperTitle: ${record.PaperTitle || ''}\nDOI: ${record.DOI || ''}`;
-        el.docxPreviewMsg.innerHTML = `
-            <i class="fa-solid fa-file-word" style="font-size: 3rem; color: #2b579a; margin-bottom: 1rem; display: block;"></i>
-            <h3>DOCX Record Preview (${state.currentPreviewIndex + 1} of ${state.records.length})</h3>
-            <pre style="text-align: left; background-color: var(--bg-input); padding: 1rem; border-radius: 4px; margin-top: 1rem; font-family: monospace; font-size: 0.8rem; line-height: 1.5; color: var(--text);">${previewText}</pre>
-        `;
-    } else {
-        await renderCertificateCanvas(state.currentPreviewIndex, el.previewCanvas);
+// Combine every record's rendered DOCX into a single multi-page DOCX file (one certificate
+// per page, separated by page breaks), reusing the first record's zip as the base package.
+function buildCombinedDocxBlob(records) {
+    const baseZip = renderDocxZipForRecord(records[0]);
+    let combinedXml = baseZip.file('word/document.xml').asText();
+
+    for (let i = 1; i < records.length; i++) {
+        const recordZip = renderDocxZipForRecord(records[i]);
+        const recordXml = recordZip.file('word/document.xml').asText();
+        combinedXml = appendRecordToCombinedXml(combinedXml, recordXml);
     }
+
+    baseZip.file('word/document.xml', combinedXml);
+    return baseZip.generate({
+        type: "blob",
+        mimeType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    });
 }
 
-// 7. ZIP Export (Handles PDF ZIP and DOCX ZIP)
+// 4. Download all certificates combined into a single Word (DOCX) file
 async function handleZipExport() {
-    if (state.records.length === 0 || !state.templateBuffer) return;
+    if (state.records.length === 0 || !state.docxLoaded) return;
 
-    if (state.fileType === 'docx') {
-        await generateDocxZIP();
-    } else {
-        await generatePdfZIP();
-    }
-}
-
-// Generate ZIP of individual DOCX files (No hardcoded styles, editing tags dynamically)
-async function generateDocxZIP() {
     const initialText = el.btnGenerateZip.innerHTML;
     el.btnGenerateZip.disabled = true;
-    el.btnGenerateZip.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Zipping DOCX files...';
-    log(`Compiling Word DOCX documents...`, 'info');
+    el.btnGenerateZip.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Generating...';
 
     try {
-        const zipArchive = new JSZip();
+        log(`Generating ${state.records.length} certificate(s) into a single Word document...`, 'system');
+        const combinedBlob = buildCombinedDocxBlob(state.records);
+        const fileName = state.records.length === 1 ? buildOutputFilename(0) : (state.authorListLine || 'certificates');
 
-        for (let i = 0; i < state.records.length; i++) {
-            const record = state.records[i];
-            log(`Generating DOCX page ${i + 1} for: ${record.NAME || `Record ${i+1}`}...`, 'system');
-
-            // Load Pizzip binary buffer
-            const docZip = new window.PizZip(state.templateBuffer);
-            const doc = new window.docxtemplater(docZip, {
-                paragraphLoop: true,
-                linebreaks: true,
-            });
-
-            // Map data (support both space, no space, underscore, and case variants for absolute safety)
-            doc.setData({
-                NAME: record.NAME ? record.NAME.toUpperCase() : '',
-                name: record.NAME ? record.NAME.toUpperCase() : '',
-                Designation: record.Designation || '',
-                designation: record.Designation || '',
-                "Paper Title": record.PaperTitle || '',
-                "paper title": record.PaperTitle || '',
-                PaperTitle: record.PaperTitle || '',
-                papertitle: record.PaperTitle || '',
-                DOI: record.DOI || '',
-                doi: record.DOI || ''
-            });
-
-            // Replace XML placeholders
-            doc.render();
-
-            // Export to blob
-            const outBlob = doc.getZip().generate({
-                type: "blob",
-                mimeType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-            });
-
-            const fileName = (record.NAME || `document_${i+1}`).trim().replace(/[^a-z0-9_-]/gi, '_');
-            zipArchive.file(`${fileName}.docx`, outBlob);
-        }
-
-        log(`Bundling ZIP package...`, 'system');
-        const zipContent = await zipArchive.generateAsync({ type: 'blob' });
-        
         const link = document.createElement('a');
-        link.href = URL.createObjectURL(zipContent);
-        link.download = 'certificates_docx_archive.zip';
+        link.href = URL.createObjectURL(combinedBlob);
+        link.download = `${fileName.replace(/[\\/:*?"<>|]/g, '_')}.docx`;
         document.body.appendChild(link);
         link.click();
         document.body.removeChild(link);
-        
-        log(`ZIP archive of Word documents downloaded successfully!`, 'success');
+        URL.revokeObjectURL(link.href);
+
+        log(`Successfully generated and downloaded the combined Word document!`, 'success');
     } catch (err) {
-        log(`DOCX compilation failed: ${err.message}`, 'error');
+        log(`Failed generation: ${err.message}`, 'error');
         console.error(err);
     } finally {
         el.btnGenerateZip.disabled = false;
         el.btnGenerateZip.innerHTML = initialText;
-    }
-}
-
-// Generate ZIP of individual PDF files
-async function generatePdfZIP() {
-    const initialText = el.btnGenerateZip.innerHTML;
-    el.btnGenerateZip.disabled = true;
-    el.btnGenerateZip.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Bundling ZIP...';
-    log(`Compiling individual certificates into ZIP file...`, 'info');
-
-    try {
-        const zip = new JSZip();
-        const { jsPDF } = window.jspdf;
-        const tempCanvas = document.createElement('canvas');
-
-        for (let i = 0; i < state.records.length; i++) {
-            const record = state.records[i];
-            log(`Rendering individual PDF ${i + 1} of ${state.records.length}...`, 'system');
-            
-            await renderCertificateCanvas(i, tempCanvas);
-            
-            const w = tempCanvas.width;
-            const h = tempCanvas.height;
-            const orientation = w >= h ? 'landscape' : 'portrait';
-            const imgData = tempCanvas.toDataURL('image/jpeg', 0.95);
-
-            const singlePdf = new jsPDF({
-                orientation: orientation,
-                unit: 'px',
-                format: [w, h]
-            });
-            singlePdf.addImage(imgData, 'JPEG', 0, 0, w, h);
-
-            const pdfBlob = singlePdf.output('blob');
-            const fileName = (record.NAME || `certificate_${i+1}`).trim().replace(/[^a-z0-9_-]/gi, '_');
-            zip.file(`${fileName}.pdf`, pdfBlob);
-        }
-
-        log(`Creating ZIP package...`, 'system');
-        const zipContent = await zip.generateAsync({ type: 'blob' });
-        
-        const link = document.createElement('a');
-        link.href = URL.createObjectURL(zipContent);
-        link.download = 'certificates_archive.zip';
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
-        
-        log(`Successfully generated and downloaded ZIP archive!`, 'success');
-    } catch (err) {
-        log(`Failed compilation: ${err.message}`, 'error');
-        console.error(err);
-    } finally {
-        el.btnGenerateZip.disabled = false;
-        el.btnGenerateZip.innerHTML = initialText;
-    }
-}
-
-// 8. Generate Combined PDF
-async function generateCombinedPDF() {
-    if (state.records.length === 0 || !state.pdfDoc) return;
-
-    const initialText = el.btnGeneratePdf.innerHTML;
-    el.btnGeneratePdf.disabled = true;
-    el.btnGeneratePdf.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Compiling PDF...';
-    log(`Compiling combined bulk PDF...`, 'info');
-
-    try {
-        const { jsPDF } = window.jspdf;
-        let pdf = null;
-        const tempCanvas = document.createElement('canvas');
-
-        for (let i = 0; i < state.records.length; i++) {
-            await renderCertificateCanvas(i, tempCanvas);
-            
-            const w = tempCanvas.width;
-            const h = tempCanvas.height;
-            const orientation = w >= h ? 'landscape' : 'portrait';
-            const imgData = tempCanvas.toDataURL('image/jpeg', 0.95);
-
-            if (i === 0) {
-                pdf = new jsPDF({
-                    orientation: orientation,
-                    unit: 'px',
-                    format: [w, h]
-                });
-            } else {
-                pdf.addPage([w, h], orientation);
-            }
-
-            pdf.addImage(imgData, 'JPEG', 0, 0, w, h);
-        }
-
-        if (pdf) {
-            pdf.save('certificates_combined.pdf');
-            log(`Successfully generated and downloaded combined PDF!`, 'success');
-        }
-    } catch (err) {
-        log(`Failed compilation: ${err.message}`, 'error');
-        console.error(err);
-    } finally {
-        el.btnGeneratePdf.disabled = false;
-        el.btnGeneratePdf.innerHTML = initialText;
     }
 }
 

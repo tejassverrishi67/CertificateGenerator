@@ -186,6 +186,23 @@ body {
     border-color: var(--accent);
 }
 
+.doi-field {
+    background-color: var(--bg-input);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 0.75rem;
+    color: var(--text);
+    font-family: monospace;
+    font-size: 0.8rem;
+    outline: none;
+    transition: border-color 0.2s;
+    width: 100%;
+}
+
+.doi-field:focus {
+    border-color: var(--accent);
+}
+
 /* Buttons */
 .btn {
     display: inline-flex;
@@ -315,11 +332,15 @@ body {
     max-height: 520px;
 }
 
-#preview-canvas {
-    max-width: 100%;
-    height: auto;
+.docx-render-preview {
     box-shadow: 0 10px 30px rgba(0,0,0,0.5);
     background-color: white;
+    transform-origin: top center;
+}
+
+.docx-render-preview .docx-wrapper {
+    background-color: white !important;
+    padding: 0 !important;
 }
 
 /* Scrollbars */
