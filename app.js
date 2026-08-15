@@ -13,6 +13,7 @@ const el = {
     docxFileName: document.getElementById('docx-file-name'),
     dataInput: document.getElementById('data-input'),
     doiInput: document.getElementById('doi-input'),
+    monthInput: document.getElementById('month-input'),
     parserStatus: document.getElementById('parser-status'),
     btnLoadDemo: document.getElementById('btn-load-demo'),
     btnGenerateZip: document.getElementById('btn-generate-zip'),
@@ -51,6 +52,7 @@ function setupEventListeners() {
     el.btnLoadDemo.addEventListener('click', loadDemoData);
     el.dataInput.addEventListener('input', handleDataInput);
     el.doiInput.addEventListener('input', handleDataInput);
+    el.monthInput.addEventListener('input', handleDataInput);
     el.btnGenerateZip.addEventListener('click', handleZipExport);
 }
 
@@ -86,7 +88,8 @@ function loadDemoData() {
         'Student, Department of Computer Science, Example Institute of Technology, Example City, Example State, Example Country2'
     ].join('\n');
     el.dataInput.value = demo;
-    el.doiInput.value = '10.9999/example.2026.00001';
+    el.doiInput.value = '10.9999/example.2026.15817';
+    el.monthInput.value = 'August';
     handleDataInput();
 }
 
@@ -101,7 +104,7 @@ function handleDocxFileSelect(file) {
         state.docxBuffer = e.target.result;
         state.docxLoaded = true;
         log(`Word Document (DOCX) loaded successfully.`, 'success');
-        log(`Format mappings to replace {NAME}, {Designation}, {PaperTitle}, and {DOI} tags inside your Word document.`, 'info');
+        log(`Format mappings to replace {NAME}, {Designation}, {Paper Title}, {DOI}, {vol}, {issue}, {year}, and {month} tags inside your Word document.`, 'info');
         handleDataInput();
     };
     reader.readAsArrayBuffer(file);
@@ -287,11 +290,18 @@ function parseDataInput(text) {
         }
     });
 
-    // Map DOI (from the dedicated DOI input field, constant applied to all certificates)
+    // Map DOI (from the dedicated DOI input field, constant applied to all certificates),
+    // plus the Volume/Issue/Year it encodes and the free-text Month field.
     const doiValue = el.doiInput.value.trim();
-    if (doiValue) {
+    const doiParts = parseDoiParts(doiValue);
+    const monthValue = el.monthInput.value.trim();
+    if (doiValue || monthValue) {
         records.forEach(record => {
             record.DOI = doiValue;
+            record.Volume = doiParts.vol;
+            record.Issue = doiParts.issue;
+            record.Year = doiParts.year;
+            record.Month = monthValue;
         });
     }
 
@@ -332,6 +342,24 @@ function extractPaperNumber(doi) {
     return runs[runs.length - 1].slice(-2);
 }
 
+// Extract Volume/Issue/Year encoded in a DOI, e.g. "10.17148/IJARCCE.2026.15817" ->
+// { vol: "15", issue: "8", year: "2026" }. The final numeric segment packs
+// VOLUME(2 digits) + ISSUE(1 digit) + FILE NUMBER(2 digits); the segment before it is the year.
+function parseDoiParts(doi) {
+    const empty = { vol: '', issue: '', year: '' };
+    if (!doi) return empty;
+    const runs = doi.match(/\d+/g);
+    if (!runs || runs.length < 2) return empty;
+    const last = runs[runs.length - 1];
+    const year = runs[runs.length - 2];
+    if (last.length < 5) return { vol: '', issue: '', year };
+    return {
+        vol: last.slice(0, 2),
+        issue: last.slice(2, 3),
+        year
+    };
+}
+
 // Build the per-certificate output filename (without extension):
 // "{paperNumber} {full author-list line} {certIndex}" when a DOI is provided,
 // otherwise "{full author-list line} {certIndex}".
@@ -367,7 +395,15 @@ function renderDocxZipForRecord(record) {
         PaperTitle: record.PaperTitle || '',
         papertitle: record.PaperTitle || '',
         DOI: record.DOI || '',
-        doi: record.DOI || ''
+        doi: record.DOI || '',
+        vol: record.Volume || '',
+        Volume: record.Volume || '',
+        issue: record.Issue || '',
+        Issue: record.Issue || '',
+        year: record.Year || '',
+        Year: record.Year || '',
+        month: record.Month || '',
+        Month: record.Month || ''
     });
 
     doc.render();
