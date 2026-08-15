@@ -29,6 +29,7 @@ const MIME = {
     '.png': 'image/png',
     '.jpg': 'image/jpeg',
     '.ico': 'image/x-icon',
+    '.docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
 };
 
 function send(res, status, body, headers = {}) {

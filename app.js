@@ -1,19 +1,29 @@
-// Zero-Styling Certificate Generator Logic (DOCX template -> DOCX + PDF rendered from that DOCX)
+// Zero-Styling Certificate Generator Logic (pre-loaded DOCX templates -> single combined DOCX)
+
+// The four journal templates shipped with the app. They live in templates/ as static assets and
+// are fetched on demand when the user picks one, so only the selected template is ever downloaded
+// (SET alone is ~1.9 MB). To add a journal: drop the .docx in templates/ and add an entry here.
+const TEMPLATES = [
+    { key: 'CCE', file: 'templates/CCE.docx' },
+    { key: 'SET', file: 'templates/SET.docx' },
+    { key: 'ICE', file: 'templates/ICE.docx' },
+    { key: 'RJR', file: 'templates/RJR.docx' }
+];
 
 const state = {
     docxLoaded: false,       // Whether a DOCX template has been loaded
-    docxBuffer: null,        // Raw ArrayBuffer of the DOCX template
+    docxBuffer: null,        // Raw ArrayBuffer of the selected DOCX template
+    templateKey: '',         // Which journal template is currently selected
+    buffers: {},             // Cache of already-fetched template ArrayBuffers, keyed by journal
     records: [],             // Parsed recipient row data
     authorListLine: ''       // Original (superscript-preserved) author-list text, used in output filenames
 };
 
 const el = {
-    uploadZoneDocx: document.getElementById('upload-zone-docx'),
-    docxUpload: document.getElementById('docx-upload'),
-    docxFileName: document.getElementById('docx-file-name'),
+    templateGrid: document.getElementById('template-grid'),
+    templateStatus: document.getElementById('template-status'),
     dataInput: document.getElementById('data-input'),
     doiInput: document.getElementById('doi-input'),
-    monthInput: document.getElementById('month-input'),
     parserStatus: document.getElementById('parser-status'),
     btnLoadDemo: document.getElementById('btn-load-demo'),
     btnGenerateZip: document.getElementById('btn-generate-zip'),
@@ -47,36 +57,15 @@ function init() {
 }
 
 function setupEventListeners() {
-    setupUploadZone(el.uploadZoneDocx, el.docxUpload, handleDocxFileSelect);
+    el.templateGrid.addEventListener('click', (e) => {
+        const card = e.target.closest('.template-card');
+        if (card) selectTemplate(card.dataset.template);
+    });
 
     el.btnLoadDemo.addEventListener('click', loadDemoData);
     el.dataInput.addEventListener('input', handleDataInput);
     el.doiInput.addEventListener('input', handleDataInput);
-    el.monthInput.addEventListener('input', handleDataInput);
     el.btnGenerateZip.addEventListener('click', handleZipExport);
-}
-
-function setupUploadZone(zoneEl, inputEl, onFile) {
-    zoneEl.addEventListener('click', () => inputEl.click());
-    inputEl.addEventListener('change', () => {
-        if (inputEl.files.length > 0) onFile(inputEl.files[0]);
-    });
-
-    zoneEl.addEventListener('dragover', (e) => {
-        e.preventDefault();
-        zoneEl.classList.add('dragover');
-    });
-    zoneEl.addEventListener('dragleave', () => {
-        zoneEl.classList.remove('dragover');
-    });
-    zoneEl.addEventListener('drop', (e) => {
-        e.preventDefault();
-        zoneEl.classList.remove('dragover');
-        if (e.dataTransfer.files.length > 0) {
-            inputEl.files = e.dataTransfer.files;
-            onFile(e.dataTransfer.files[0]);
-        }
-    });
 }
 
 // Load Example Data
@@ -89,25 +78,57 @@ function loadDemoData() {
     ].join('\n');
     el.dataInput.value = demo;
     el.doiInput.value = '10.9999/example.2026.15817';
-    el.monthInput.value = 'August';
     handleDataInput();
 }
 
-// 1. Load Template File (DOCX)
-function handleDocxFileSelect(file) {
-    if (!file) return;
-    el.docxFileName.textContent = file.name;
-    log(`Loading DOCX file: ${file.name}...`, 'system');
+// 1. Select one of the pre-loaded journal templates
+function markActiveCard(key) {
+    el.templateGrid.querySelectorAll('.template-card').forEach(card => {
+        card.classList.toggle('active', card.dataset.template === key);
+    });
+}
 
-    const reader = new FileReader();
-    reader.onload = function(e) {
-        state.docxBuffer = e.target.result;
+async function selectTemplate(key) {
+    const template = TEMPLATES.find(t => t.key === key);
+    if (!template) return;
+
+    markActiveCard(key);
+
+    // Re-selecting an already-fetched template is instant: swap the cached buffer back in.
+    if (state.buffers[key]) {
+        state.docxBuffer = state.buffers[key];
         state.docxLoaded = true;
-        log(`Word Document (DOCX) loaded successfully.`, 'success');
-        log(`Format mappings to replace {NAME}, {Designation}, {Paper Title}, {DOI}, {vol}, {issue}, {year}, and {month} tags inside your Word document.`, 'info');
+        state.templateKey = key;
+        el.templateStatus.textContent = `${key} template selected`;
+        log(`Switched to the ${key} template.`, 'success');
         handleDataInput();
-    };
-    reader.readAsArrayBuffer(file);
+        return;
+    }
+
+    el.templateStatus.textContent = `Loading ${key} template...`;
+    log(`Loading the ${key} certificate template...`, 'system');
+
+    try {
+        const res = await fetch(template.file);
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const buffer = await res.arrayBuffer();
+
+        state.buffers[key] = buffer;
+        state.docxBuffer = buffer;
+        state.docxLoaded = true;
+        state.templateKey = key;
+
+        el.templateStatus.textContent = `${key} template selected`;
+        log(`${key} template loaded successfully.`, 'success');
+        handleDataInput();
+    } catch (err) {
+        // Leave docxLoaded false so the export button stays disabled.
+        state.docxLoaded = false;
+        markActiveCard('');
+        el.templateStatus.textContent = 'No template selected';
+        log(`Could not load the ${key} template: ${err.message}`, 'error');
+        toggleButtons(false);
+    }
 }
 
 // Helper to disable/enable export buttons
@@ -291,17 +312,16 @@ function parseDataInput(text) {
     });
 
     // Map DOI (from the dedicated DOI input field, constant applied to all certificates),
-    // plus the Volume/Issue/Year it encodes and the free-text Month field.
+    // plus the Volume/Issue/Year/Month it encodes.
     const doiValue = el.doiInput.value.trim();
     const doiParts = parseDoiParts(doiValue);
-    const monthValue = el.monthInput.value.trim();
-    if (doiValue || monthValue) {
+    if (doiValue) {
         records.forEach(record => {
             record.DOI = doiValue;
             record.Volume = doiParts.vol;
             record.Issue = doiParts.issue;
             record.Year = doiParts.year;
-            record.Month = monthValue;
+            record.Month = doiParts.month;
         });
     }
 
@@ -342,21 +362,31 @@ function extractPaperNumber(doi) {
     return runs[runs.length - 1].slice(-2);
 }
 
-// Extract Volume/Issue/Year encoded in a DOI, e.g. "10.17148/IJARCCE.2026.15817" ->
-// { vol: "15", issue: "8", year: "2026" }. The final numeric segment packs
-// VOLUME(2 digits) + ISSUE(1 digit) + FILE NUMBER(2 digits); the segment before it is the year.
+const MONTH_NAMES = ['January', 'February', 'March', 'April', 'May', 'June',
+                     'July', 'August', 'September', 'October', 'November', 'December'];
+
+// Extract Volume/Issue/Year/Month encoded in a DOI, e.g. "10.17148/IJARCCE.2026.15817" ->
+// { vol: "15", issue: "8", year: "2026", month: "August" }. The final numeric segment packs
+// VOLUME(2 digits) + ISSUE + FILE NUMBER(2 digits), so the issue is whatever sits between them
+// -- one digit for issues 1-9, two for issues 10-12. The segment before it is the year.
+//
+// The issue number IS the month of publication (issue 7 = July, issue 9 = September), so the
+// month is derived rather than entered by hand.
 function parseDoiParts(doi) {
-    const empty = { vol: '', issue: '', year: '' };
+    const empty = { vol: '', issue: '', year: '', month: '' };
     if (!doi) return empty;
     const runs = doi.match(/\d+/g);
     if (!runs || runs.length < 2) return empty;
     const last = runs[runs.length - 1];
     const year = runs[runs.length - 2];
-    if (last.length < 5) return { vol: '', issue: '', year };
+    if (last.length < 5) return { vol: '', issue: '', year, month: '' };
+
+    const issueNum = parseInt(last.slice(2, -2), 10);
     return {
         vol: last.slice(0, 2),
-        issue: last.slice(2, 3),
-        year
+        issue: isNaN(issueNum) ? '' : String(issueNum),
+        year,
+        month: MONTH_NAMES[issueNum - 1] || ''
     };
 }
 
@@ -376,12 +406,40 @@ function buildOutputFilename(index) {
     return name.replace(/[\\/:*?"<>|]/g, '_');
 }
 
+// Reduce a placeholder tag to a canonical form so lookups tolerate case and spacing differences:
+// "Paper Title", "paper_title" and "PAPERTITLE" all collapse to "papertitle".
+function normalizeTag(tag) {
+    return String(tag).toLowerCase().replace(/[\s_]+/g, '');
+}
+
 // 3. Generate a filled DOCX package (PizZip instance) for one record
 function renderDocxZipForRecord(record) {
     const docZip = new window.PizZip(state.docxBuffer);
+
+    // Canonical values, keyed by normalized tag name. This backs the nullGetter below, which
+    // catches placeholders whose spelling doesn't exactly match a key in setData -- notably the
+    // RJR template, which spells its name tag "{NAMe}". Without this, docxtemplater's default
+    // nullGetter would stamp the literal text "undefined" onto the certificate. Unknown tags
+    // resolve to an empty string rather than failing the render.
+    const canonical = {
+        name: record.NAME ? record.NAME.toUpperCase() : '',
+        designation: record.Designation || '',
+        papertitle: record.PaperTitle || '',
+        doi: record.DOI || '',
+        vol: record.Volume || '',
+        volume: record.Volume || '',
+        issue: record.Issue || '',
+        year: record.Year || '',
+        month: record.Month || ''
+    };
+
     const doc = new window.docxtemplater(docZip, {
         paragraphLoop: true,
         linebreaks: true,
+        nullGetter(part) {
+            const value = canonical[normalizeTag(part.value)];
+            return value === undefined ? '' : value;
+        },
     });
 
     // Map data (support both space, no space, underscore, and case variants for absolute safety)

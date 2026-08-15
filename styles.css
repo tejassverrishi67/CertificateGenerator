@@ -114,34 +114,61 @@ body {
     color: var(--text);
 }
 
-/* Upload Zone */
-.upload-zone {
-    border: 2px dashed var(--border);
-    border-radius: 8px;
-    padding: 2rem 1.5rem;
-    text-align: center;
-    cursor: pointer;
-    background-color: rgba(255, 255, 255, 0.01);
-    transition: all 0.2s ease;
+/* Template Picker */
+.template-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 0.6rem;
+    margin-bottom: 0.85rem;
+}
+
+.template-card {
     display: flex;
     flex-direction: column;
     align-items: center;
-    gap: 0.75rem;
+    justify-content: center;
+    gap: 0.5rem;
+    padding: 1.1rem 0.5rem;
+    border: 2px solid var(--border);
+    border-radius: 8px;
+    background-color: rgba(255, 255, 255, 0.01);
+    color: var(--text);
+    font-family: inherit;
+    font-size: 0.85rem;
+    font-weight: 600;
+    letter-spacing: 0.03em;
+    cursor: pointer;
+    transition: all 0.2s ease;
 }
 
-.upload-zone:hover, .upload-zone.dragover {
+.template-card i {
+    font-size: 1.5rem;
+    color: var(--text-muted);
+    transition: color 0.2s ease;
+}
+
+.template-card:hover {
     border-color: var(--accent);
     background-color: rgba(99, 102, 241, 0.04);
 }
 
-.upload-icon {
-    font-size: 2.25rem;
-    color: var(--text-muted);
+.template-card:hover i {
+    color: var(--accent-light);
 }
 
-.upload-zone p {
-    font-size: 0.8rem;
-    color: var(--text-muted);
+.template-card.active {
+    border-color: var(--accent);
+    background-color: rgba(99, 102, 241, 0.12);
+}
+
+.template-card.active i {
+    color: var(--accent-light);
+}
+
+@media (max-width: 480px) {
+    .template-grid {
+        grid-template-columns: repeat(2, 1fr);
+    }
 }
 
 .file-name {

@@ -22,7 +22,7 @@
                 <span>CertifyAutomator</span>
             </div>
             <h1>Smart DOCX Bulk Certificate Generator</h1>
-            <p class="subtitle">Upload a Word (DOCX) template containing placeholders like {NAME}, paste mapping data, and generate bulk certificates. Each certificate is exported both as a native DOCX and as a PDF rendered directly from that same DOCX, so the two always match.</p>
+            <p class="subtitle">Pick one of the four journal templates, paste your mapping data, and generate every certificate as a single combined Word document.</p>
         </header>
 
         <main class="grid-layout">
@@ -31,14 +31,27 @@
                 <div class="card">
                     <div class="card-header">
                         <i class="fa-solid fa-file-invoice"></i>
-                        <h2>1. Upload Template (DOCX)</h2>
+                        <h2>1. Choose Certificate Template</h2>
                     </div>
-                    <div class="upload-zone" id="upload-zone-docx">
-                        <input type="file" id="docx-upload" accept=".docx" style="display: none;">
-                        <i class="fa-solid fa-file-word upload-icon"></i>
-                        <p>Drag & drop your Word DOCX template, or click to browse</p>
-                        <span class="file-name" id="docx-file-name">No template loaded</span>
+                    <div class="template-grid" id="template-grid">
+                        <button type="button" class="template-card" data-template="CCE">
+                            <i class="fa-solid fa-file-word"></i>
+                            <span>CCE</span>
+                        </button>
+                        <button type="button" class="template-card" data-template="SET">
+                            <i class="fa-solid fa-file-word"></i>
+                            <span>SET</span>
+                        </button>
+                        <button type="button" class="template-card" data-template="ICE">
+                            <i class="fa-solid fa-file-word"></i>
+                            <span>ICE</span>
+                        </button>
+                        <button type="button" class="template-card" data-template="RJR">
+                            <i class="fa-solid fa-file-word"></i>
+                            <span>RJR</span>
+                        </button>
                     </div>
+                    <span class="file-name" id="template-status">No template selected</span>
                 </div>
 
                 <div class="card">
@@ -63,15 +76,7 @@
                         <h2>3. DOI (Optional)</h2>
                     </div>
                     <input type="text" id="doi-input" class="doi-field" placeholder="e.g. 10.1234/example.2026.00001">
-                    <p class="hint">Volume, Issue, and Year are extracted automatically from the DOI (e.g. ...2026.15817 → Vol 15, Issue 8, Year 2026).</p>
-                </div>
-
-                <div class="card">
-                    <div class="card-header">
-                        <i class="fa-solid fa-calendar"></i>
-                        <h2>4. Month (Optional)</h2>
-                    </div>
-                    <input type="text" id="month-input" class="doi-field" placeholder="e.g. August">
+                    <p class="hint">Volume, Issue, Year and Month are all extracted automatically from the DOI — the issue number is the month (e.g. ...2026.15817 → Vol 15, Issue 8, Year 2026, August).</p>
                 </div>
 
                 <div class="card action-card">
