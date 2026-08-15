@@ -22,7 +22,7 @@
                 <span>CertifyAutomator</span>
             </div>
             <h1>Smart DOCX Bulk Certificate Generator</h1>
-            <p class="subtitle">Pick one of the four journal templates, paste your mapping data, and generate every certificate as a single combined Word document.</p>
+            <p class="subtitle">Pick a journal template, paste your mapping data, and download as one combined file, individual files per recipient, or a single group certificate.</p>
         </header>
 
         <main class="grid-layout">
@@ -31,33 +31,16 @@
                 <div class="card">
                     <div class="card-header">
                         <i class="fa-solid fa-file-invoice"></i>
-                        <h2>1. Choose Certificate Template</h2>
+                        <h2>1. Choose eCertificate Template</h2>
                     </div>
-                    <div class="template-grid" id="template-grid">
-                        <button type="button" class="template-card" data-template="CCE">
-                            <i class="fa-solid fa-file-word"></i>
-                            <span>CCE</span>
-                        </button>
-                        <button type="button" class="template-card" data-template="SET">
-                            <i class="fa-solid fa-file-word"></i>
-                            <span>SET</span>
-                        </button>
-                        <button type="button" class="template-card" data-template="ICE">
-                            <i class="fa-solid fa-file-word"></i>
-                            <span>ICE</span>
-                        </button>
-                        <button type="button" class="template-card" data-template="RJR">
-                            <i class="fa-solid fa-file-word"></i>
-                            <span>RJR</span>
-                        </button>
-                    </div>
+                    <div class="template-grid" id="template-grid"></div>
                     <span class="file-name" id="template-status">No template selected</span>
                 </div>
 
                 <div class="card">
                     <div class="card-header">
                         <i class="fa-solid fa-keyboard"></i>
-                        <h2>2. Mapping Text Box Inputs</h2>
+                        <h2>2. Paste Title, Author Names &amp; Affiliations</h2>
                     </div>
                     <div class="textarea-container">
                         <div class="textarea-actions">
@@ -73,7 +56,7 @@
                 <div class="card">
                     <div class="card-header">
                         <i class="fa-solid fa-link"></i>
-                        <h2>3. Publication Details</h2>
+                        <h2>3. Choose</h2>
                     </div>
                     <div class="mode-toggle" id="mode-toggle">
                         <button type="button" class="mode-btn active" data-mode="with">With DOI</button>
@@ -96,10 +79,34 @@
                     </div>
                 </div>
 
-                <div class="card action-card">
-                    <button class="btn btn-primary" id="btn-generate-zip" disabled>
-                        <i class="fa-solid fa-file-word"></i> Download Combined Word File
-                    </button>
+                <div class="card">
+                    <div class="card-header">
+                        <i class="fa-solid fa-download"></i>
+                        <h2>4. Download</h2>
+                    </div>
+                    <div class="download-options">
+                        <button type="button" class="download-option-btn" id="btn-download-all" disabled>
+                            <i class="fa-solid fa-file-word"></i>
+                            <span class="download-option-text">
+                                <span class="download-option-title">All in One</span>
+                                <span class="download-option-subtitle">Every certificate combined into a single multi-page Word file</span>
+                            </span>
+                        </button>
+                        <button type="button" class="download-option-btn" id="btn-download-multi" disabled>
+                            <i class="fa-solid fa-copy"></i>
+                            <span class="download-option-text">
+                                <span class="download-option-title">Multiple Downloads</span>
+                                <span class="download-option-subtitle">Each certificate downloaded as its own separate file</span>
+                            </span>
+                        </button>
+                        <button type="button" class="download-option-btn" id="btn-download-group" disabled>
+                            <i class="fa-solid fa-users"></i>
+                            <span class="download-option-text">
+                                <span class="download-option-title">Group Download</span>
+                                <span class="download-option-subtitle">One certificate listing every author together</span>
+                            </span>
+                        </button>
+                    </div>
                 </div>
             </section>
 

@@ -2,12 +2,14 @@
 
 // The four journal templates shipped with the app. They live in templates/ as static assets and
 // are fetched on demand when the user picks one, so only the selected template is ever downloaded
-// (SET alone is ~1.9 MB). To add a journal: drop the .docx in templates/ and add an entry here.
+// (SET alone is ~1.9 MB). This array is the single source of truth for the template picker -- the
+// grid in index.html is generated from it (see renderTemplateGrid) rather than hardcoded, so
+// adding a journal only means adding an entry here plus its .docx/logo files.
 const TEMPLATES = [
-    { key: 'CCE', file: 'templates/CCE.docx' },
-    { key: 'SET', file: 'templates/SET.docx' },
-    { key: 'ICE', file: 'templates/ICE.docx' },
-    { key: 'RJR', file: 'templates/RJR.docx' }
+    { key: 'CCE', fullName: 'IJARCCE',   file: 'templates/CCE.docx', logo: 'logos/CCE.jpg' },
+    { key: 'SET', fullName: 'IARJSET',   file: 'templates/SET.docx', logo: 'logos/SET.jpg' },
+    { key: 'ICE', fullName: 'IJIREEICE', file: 'templates/ICE.docx', logo: 'logos/ICE.jpg' },
+    { key: 'RJR', fullName: 'IMRJR',     file: 'templates/RJR.docx', logo: 'logos/RJR.jpg' }
 ];
 
 const state = {
@@ -34,7 +36,9 @@ const el = {
     yearInput: document.getElementById('year-input'),
     parserStatus: document.getElementById('parser-status'),
     btnLoadDemo: document.getElementById('btn-load-demo'),
-    btnGenerateZip: document.getElementById('btn-generate-zip'),
+    btnDownloadAll: document.getElementById('btn-download-all'),
+    btnDownloadMulti: document.getElementById('btn-download-multi'),
+    btnDownloadGroup: document.getElementById('btn-download-group'),
     logsContainer: document.getElementById('logs-container')
 };
 
@@ -61,7 +65,21 @@ function log(msg, type = 'system') {
 
 // Initialize listeners
 function init() {
+    renderTemplateGrid();
     setupEventListeners();
+}
+
+// Build the template picker from TEMPLATES -- the array is the only place a journal is defined.
+function renderTemplateGrid() {
+    el.templateGrid.innerHTML = '';
+    TEMPLATES.forEach(template => {
+        const card = document.createElement('button');
+        card.type = 'button';
+        card.className = 'template-card';
+        card.dataset.template = template.key;
+        card.innerHTML = `<img src="${template.logo}" alt="${template.fullName}"><span>${template.fullName}</span>`;
+        el.templateGrid.appendChild(card);
+    });
 }
 
 function setupEventListeners() {
@@ -73,7 +91,9 @@ function setupEventListeners() {
     el.btnLoadDemo.addEventListener('click', loadDemoData);
     el.dataInput.addEventListener('input', handleDataInput);
     el.doiInput.addEventListener('input', handleDataInput);
-    el.btnGenerateZip.addEventListener('click', handleZipExport);
+    el.btnDownloadAll.addEventListener('click', handleDownloadAllInOne);
+    el.btnDownloadMulti.addEventListener('click', handleDownloadMultiple);
+    el.btnDownloadGroup.addEventListener('click', handleDownloadGroup);
 
     el.modeToggle.addEventListener('click', (e) => {
         const btn = e.target.closest('.mode-btn');
@@ -162,7 +182,9 @@ async function selectTemplate(key) {
 
 // Helper to disable/enable export buttons
 function toggleButtons(enabled) {
-    el.btnGenerateZip.disabled = !enabled;
+    el.btnDownloadAll.disabled = !enabled;
+    el.btnDownloadMulti.disabled = !enabled;
+    el.btnDownloadGroup.disabled = !enabled;
 }
 
 // 2. Data Inputs Parser
@@ -437,18 +459,72 @@ function getPublicationInfo() {
     };
 }
 
-// Build the output filename (without extension) for the combined Word file:
-// "{fileNumber} {full author-list line}", e.g. "17 Author1, Author2". The file number comes from
-// the DOI or the manual field depending on the active mode, and is omitted when not available.
+// Only strip characters that are actually invalid in filenames; keep spaces, commas, superscripts.
+function sanitizeFilename(name) {
+    return name.replace(/[\\/:*?"<>|]/g, '_');
+}
+
+// Build the output filename (without extension) shared by the "All in One" and "Group Download"
+// modes, both of which produce a single file: "{fileNumber} {full author-list line}",
+// e.g. "17 Author1, Author2". The file number comes from the DOI or the manual field depending on
+// the active mode, and is omitted when not available.
 function buildCombinedFilename() {
     const { fileNumber } = getPublicationInfo();
     const parts = [];
     if (fileNumber) parts.push(fileNumber);
     if (state.authorListLine) parts.push(state.authorListLine);
+    return sanitizeFilename(parts.join(' ').trim() || 'certificates');
+}
 
-    const name = parts.join(' ').trim() || 'certificates';
-    // Only strip characters that are actually invalid in filenames; keep spaces, commas, superscripts.
-    return name.replace(/[\\/:*?"<>|]/g, '_');
+// Build the output filename (without extension) for one certificate in "Multiple Downloads" mode:
+// "{fileNumber} {full author-list line} {certIndex}" -- every file shares the same base name and
+// differs only by the trailing 1-based certificate index.
+function buildIndividualFilename(index) {
+    const { fileNumber } = getPublicationInfo();
+    const parts = [];
+    if (fileNumber) parts.push(fileNumber);
+    if (state.authorListLine) parts.push(state.authorListLine);
+    parts.push(String(index + 1));
+    return sanitizeFilename(parts.join(' ').trim());
+}
+
+// Collapse a list of values to their distinct entries (first-occurrence order, empties dropped),
+// comma-joined. Used by Group Download to combine every record's Designation/PaperTitle onto the
+// single combined certificate without repeating a value that's shared by multiple authors.
+function dedupeJoin(values) {
+    const seen = [];
+    values.forEach(v => {
+        const trimmed = (v || '').trim();
+        if (trimmed && !seen.includes(trimmed)) seen.push(trimmed);
+    });
+    return seen.join(', ');
+}
+
+// Build the single synthetic record used by Group Download: every recipient's name and
+// designation combined onto one certificate, rather than one certificate per recipient.
+function buildGroupRecord() {
+    const first = state.records[0];
+    return {
+        NAME: state.records.map(r => r.NAME).join(', '),
+        Designation: dedupeJoin(state.records.map(r => r.Designation)),
+        PaperTitle: dedupeJoin(state.records.map(r => r.PaperTitle)),
+        DOI: first.DOI,
+        Volume: first.Volume,
+        Issue: first.Issue,
+        Year: first.Year,
+        Month: first.Month
+    };
+}
+
+// Trigger a browser download of a blob, then release the object URL once the click is queued.
+function triggerDownload(blob, filename) {
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(blob);
+    link.download = filename;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(link.href);
 }
 
 // Reduce a placeholder tag to a canonical form so lookups tolerate case and spacing differences:
@@ -565,35 +641,63 @@ function buildCombinedDocxBlob(records) {
     });
 }
 
-// 4. Download all certificates combined into a single Word (DOCX) file
-async function handleZipExport() {
+// Shared "disable every download button, show a spinner on the clicked one, restore afterward"
+// wrapper so a user can't fire two exports at once, and errors from any mode are logged the
+// same way.
+async function runDownload(btnEl, task) {
     if (state.records.length === 0 || !state.docxLoaded) return;
 
-    const initialText = el.btnGenerateZip.innerHTML;
-    el.btnGenerateZip.disabled = true;
-    el.btnGenerateZip.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Generating...';
+    const initialHTML = btnEl.innerHTML;
+    toggleButtons(false);
+    btnEl.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Generating...';
 
     try {
-        log(`Generating ${state.records.length} certificate(s) into a single Word document...`, 'system');
-        const combinedBlob = buildCombinedDocxBlob(state.records);
-        const fileName = buildCombinedFilename();
-
-        const link = document.createElement('a');
-        link.href = URL.createObjectURL(combinedBlob);
-        link.download = `${fileName}.docx`;
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
-        URL.revokeObjectURL(link.href);
-
-        log(`Successfully generated and downloaded the combined Word document!`, 'success');
+        await task();
     } catch (err) {
         log(`Failed generation: ${err.message}`, 'error');
         console.error(err);
     } finally {
-        el.btnGenerateZip.disabled = false;
-        el.btnGenerateZip.innerHTML = initialText;
+        btnEl.innerHTML = initialHTML;
+        toggleButtons(state.docxLoaded && state.records.length > 0);
     }
+}
+
+// 4a. All in One: every certificate combined into a single multi-page Word file
+async function handleDownloadAllInOne() {
+    await runDownload(el.btnDownloadAll, async () => {
+        log(`Generating ${state.records.length} certificate(s) into a single Word document...`, 'system');
+        const blob = buildCombinedDocxBlob(state.records);
+        triggerDownload(blob, `${buildCombinedFilename()}.docx`);
+        log(`Successfully generated and downloaded the combined Word document!`, 'success');
+    });
+}
+
+// 4b. Multiple Downloads: one separate Word file per recipient, triggered in sequence. Each
+// download is staggered slightly so Chrome doesn't drop downloads fired in the same tick; the
+// browser may show a one-time "this site wants to download multiple files" prompt after the
+// second file, which is expected.
+async function handleDownloadMultiple() {
+    await runDownload(el.btnDownloadMulti, async () => {
+        const total = state.records.length;
+        log(`Generating ${total} individual certificate(s)...`, 'system');
+        for (let i = 0; i < total; i++) {
+            const blob = renderDocxBlobForRecord(state.records[i]);
+            triggerDownload(blob, `${buildIndividualFilename(i)}.docx`);
+            log(`Downloaded certificate ${i + 1} of ${total}.`, 'success');
+            if (i < total - 1) await new Promise(resolve => setTimeout(resolve, 250));
+        }
+        log(`All ${total} certificates downloaded individually.`, 'success');
+    });
+}
+
+// 4c. Group Download: every recipient combined onto one certificate (one page, one file).
+async function handleDownloadGroup() {
+    await runDownload(el.btnDownloadGroup, async () => {
+        log(`Generating one combined certificate for all ${state.records.length} author(s)...`, 'system');
+        const blob = buildCombinedDocxBlob([buildGroupRecord()]);
+        triggerDownload(blob, `${buildCombinedFilename()}.docx`);
+        log(`Successfully generated and downloaded the group certificate!`, 'success');
+    });
 }
 
 // DOM trigger
