@@ -270,10 +270,16 @@ body {
     color: #fff;
 }
 
-/* Manual volume / issue / file number / year entry */
+/* Manual volume / issue / year / file number entry */
 .manual-grid {
+    display: flex;
+    flex-direction: column;
+    gap: 0.7rem;
+}
+
+.manual-row {
     display: grid;
-    grid-template-columns: repeat(2, 1fr);
+    grid-template-columns: repeat(3, 1fr);
     gap: 0.7rem;
 }
 
@@ -289,7 +295,6 @@ body {
 }
 
 .manual-grid .hint {
-    grid-column: 1 / -1;
     margin-top: 0;
 }
 
