@@ -383,24 +383,35 @@ function renderDocxBlobForRecord(record) {
 }
 
 // Splice one record's rendered body content (all paragraphs before its <w:sectPr>) into
-// the combined document's body, right before the combined document's own <w:sectPr>,
-// prefixed with a page break. Since every record is rendered from the same template,
-// headers/footers/media/relationship IDs are identical across records, so only the body
-// paragraphs need to be merged.
+// the combined document's body, right before the combined document's own <w:sectPr>.
+// Since every record is rendered from the same template, headers/footers/media/relationship
+// IDs are identical across records, so only the body paragraphs need to be merged.
 function appendRecordToCombinedXml(combinedXml, recordXml) {
     const sectPrOpenTag = '<w:sectPr';
-    const bodyCloseTag = '</w:body>';
 
     const recordSectPrIdx = recordXml.lastIndexOf(sectPrOpenTag);
     const bodyOpenIdx = recordXml.indexOf('<w:body>') + '<w:body>'.length;
-    const recordBodyContent = recordXml.slice(bodyOpenIdx, recordSectPrIdx);
+    let recordBodyContent = recordXml.slice(bodyOpenIdx, recordSectPrIdx);
 
-    const pageBreak = '<w:p><w:r><w:br w:type="page"/></w:r></w:p>';
+    // Inject the page break as a run inside the record's first paragraph (right after that
+    // paragraph's properties, if any) instead of adding a separate paragraph for it — a
+    // standalone break paragraph renders as extra blank space at the top of the new page.
+    const pageBreakRun = '<w:r><w:br w:type="page"/></w:r>';
+    const firstParaMatch = /<w:p[ >]/.exec(recordBodyContent);
+    const firstParaIdx = firstParaMatch ? firstParaMatch.index : -1;
+    if (firstParaIdx !== -1) {
+        const pPrMatch = /<w:pPr[\s\S]*?<\/w:pPr>/.exec(recordBodyContent.slice(firstParaIdx));
+        const insertAt = pPrMatch
+            ? firstParaIdx + pPrMatch.index + pPrMatch[0].length
+            : recordBodyContent.indexOf('>', firstParaIdx) + 1;
+        recordBodyContent = recordBodyContent.slice(0, insertAt) + pageBreakRun + recordBodyContent.slice(insertAt);
+    } else {
+        recordBodyContent = `<w:p>${pageBreakRun}</w:p>` + recordBodyContent;
+    }
 
     const combinedSectPrIdx = combinedXml.lastIndexOf(sectPrOpenTag);
     return (
         combinedXml.slice(0, combinedSectPrIdx) +
-        pageBreak +
         recordBodyContent +
         combinedXml.slice(combinedSectPrIdx)
     );
