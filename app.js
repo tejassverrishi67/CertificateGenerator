@@ -114,6 +114,10 @@ function setDoiMode(mode) {
     el.doiFields.hidden = state.doiMode !== 'with';
     el.manualFields.hidden = state.doiMode !== 'without';
 
+    // Leaving "With DOI" clears the DOI box so a stale value can't reappear (or be picked up
+    // again) if the user switches back and forth. In "without" mode the DOI renders empty.
+    if (state.doiMode === 'without') el.doiInput.value = '';
+
     handleDataInput();
 }
 
@@ -199,14 +203,20 @@ function handleDataInput() {
 
     try {
         state.records = parseDataInput(text);
-        el.parserStatus.textContent = `${state.records.length} records parsed successfully`;
-
-        if (state.docxLoaded) {
-            toggleButtons(true);
-        }
+        el.parserStatus.textContent = `${state.records.length} record(s) parsed`
+            + (state.docxLoaded ? '' : ' — pick a template to enable downloads');
+        toggleButtons(state.docxLoaded);
+        state._lastParseError = null;
     } catch (err) {
+        state.records = [];
         el.parserStatus.textContent = `Parse error: ${err.message}`;
         toggleButtons(false);
+        // Surface it in the visible log too (once per distinct message) so a failed parse
+        // isn't just a greyed-out button with no explanation.
+        if (state._lastParseError !== err.message) {
+            log(`Could not read the recipient data: ${err.message}`, 'error');
+            state._lastParseError = err.message;
+        }
     }
 }
 
@@ -263,36 +273,82 @@ function parseDataInput(text) {
         PaperTitle: []
     };
 
+    const NAME_KEYWORDS = ['student', 'professor', 'lecturer', 'department', 'college', 'university', 'researcher', 'studies', 'faculty', 'india', 'scholar'];
+
+    const addName = (norm, orig) => {
+        classification.NAME.push(norm);
+        classification.NAME_ORIGINAL.push(orig);
+    };
+
     normLines.forEach((line, i) => {
         const trimmed = line.trim();
         if (!trimmed) return;
 
-        // 1. Name Classify (e.g. contains Mr/Ms prefix, or multiple comma items with numeric suffixes)
-        const isNameList = trimmed.includes('Mr.') || trimmed.includes('Ms.') || trimmed.includes('Mrs.') || trimmed.includes('Dr.');
         const parsed = parseMappingLine(trimmed);
-        const allShort = parsed.length > 0 && parsed.every(item => item.val.length < 25);
-        if (isNameList || (parsed.length > 1 && allShort)) {
-            classification.NAME.push(trimmed);
-            classification.NAME_ORIGINAL.push(origLines[i]);
+        const hasSuffix = parsed.length > 0 && parsed.some(item => /\d/.test(item.suffix));
+        const allShort = parsed.length > 0 && parsed.every(item => item.val.length < 40);
+        const noInnerCommas = parsed.every(item => !item.val.includes(','));
+        const hasKeyword = NAME_KEYWORDS.some(kw => trimmed.toLowerCase().includes(kw));
+        const hadSuperscript = /[⁰¹²³⁴⁵⁶⁷⁸⁹]/.test(origLines[i] || '');
+        const words = parsed.length === 1 ? parsed[0].val.split(/\s+/).filter(Boolean).length : 0;
+
+        // 1. Honorific prefix ("Mr.", "Dr ", "Prof.") is an unambiguous name marker. The dot
+        //    or the space after it is required so ordinary names ("Mrinal1", "Drithi1") don't match.
+        if (/(^|[\s,(])(Mr|Mrs|Ms|Dr|Prof)(\.|\s)/i.test(trimmed)) {
+            addName(trimmed, origLines[i]);
             return;
         }
 
-        // 2. Designation Classify (contains academic/corporate keywords)
-        const keywords = ['student', 'professor', 'lecturer', 'department', 'college', 'university', 'researcher', 'studies', 'faculty', 'india', 'scholar'];
-        const lower = trimmed.toLowerCase();
-        const hasKeyword = keywords.some(kw => lower.includes(kw));
+        // 2. Academic/corporate keywords mark an affiliation/designation line.
         if (hasKeyword) {
             classification.Designation.push(trimmed);
             return;
         }
 
-        // 3. Default to Paper Title
+        // 3. A suffixed, comma-free line that is either a comma-separated list of short values,
+        //    a superscript-tagged author, or a single short (<=3 word) value is a name line.
+        //    The single-value case is what lets a lone recipient ("Ravi Kumar1") work at all --
+        //    previously it fell through to "no Name line" and no certificate could be generated.
+        if (hasSuffix && noInnerCommas &&
+            ((parsed.length >= 2 && allShort) || hadSuperscript || (words >= 1 && words <= 3 && parsed[0].val.length < 28))) {
+            addName(trimmed, origLines[i]);
+            return;
+        }
+
+        // 4. A suffixed line that reads like prose (one value, 4+ words, no commas) is a paper
+        //    title whose trailing number ("... for COVID 19", "Industry 4.0") is not a mapping
+        //    index -- route it to the title bucket so the text isn't mistaken for an affiliation.
+        if (hasSuffix && noInnerCommas && words >= 4) {
+            classification.PaperTitle.push(trimmed);
+            return;
+        }
+
+        // 5. Any other suffixed line (short, or with internal commas) is an affiliation.
+        if (hasSuffix) {
+            classification.Designation.push(trimmed);
+            return;
+        }
+
+        // 6. No suffix at all -> a constant paper title.
         classification.PaperTitle.push(trimmed);
     });
 
+    // Fallback: nothing looked like a name, but a line carries mapping suffixes -- promote the
+    // first such line (affiliations are checked before titles) rather than failing outright.
+    if (classification.NAME.length === 0) {
+        for (const pool of [classification.Designation, classification.PaperTitle]) {
+            const idx = pool.findIndex(l => parseMappingLine(l).some(it => /\d/.test(it.suffix)));
+            if (idx !== -1) {
+                const [line] = pool.splice(idx, 1);
+                addName(line, line);
+                break;
+            }
+        }
+    }
+
     // We must have at least one NAME line to determine the count
     if (classification.NAME.length === 0) {
-        throw new Error("Could not detect any Name line containing certificate mapping suffixes (e.g., Name1, Name2).");
+        throw new Error("Could not detect any Name line. Add a numeric suffix to at least one name, e.g. \"Ravi Kumar1\".");
     }
 
     // Store the original (superscript-preserved) author-list line(s) for filename generation
@@ -319,48 +375,32 @@ function parseDataInput(text) {
     // Initialize records
     const records = Array.from({ length: maxIdx }, () => ({}));
 
+    const inRange = idx => idx >= 1 && idx <= maxIdx;
+
     // Map Names
     nameItems.forEach(item => {
-        const indexes = parseSuffix(item.suffix);
-        indexes.forEach(idx => {
-            if (idx - 1 < maxIdx) {
-                records[idx - 1].NAME = item.val;
-            }
+        parseSuffix(item.suffix).forEach(idx => {
+            if (inRange(idx)) records[idx - 1].NAME = item.val;
         });
     });
 
-    // Map Designations (supports multiple lines targeting different pages)
-    classification.Designation.forEach(line => {
+    // Map a "field, suffix" line onto records. If none of its suffixes point at a real
+    // certificate (e.g. the line is "Industry 4.0" or "... Survey 2024" and the trailing
+    // number was mistaken for a mapping index), fall back to applying the whole original
+    // line to every certificate so the text is never silently dropped.
+    function applyMappedLine(line, field) {
         const items = parseMappingLine(line);
+        let mapped = 0;
         items.forEach(item => {
-            const indexes = parseSuffix(item.suffix);
-            indexes.forEach(idx => {
-                if (idx - 1 < maxIdx) {
-                    records[idx - 1].Designation = item.val;
-                }
+            parseSuffix(item.suffix).forEach(idx => {
+                if (inRange(idx)) { records[idx - 1][field] = item.val; mapped++; }
             });
         });
-    });
+        if (mapped === 0) records.forEach(record => { record[field] = line; });
+    }
 
-    // Map Paper Titles (constant if no suffix, mapped if suffix is present)
-    classification.PaperTitle.forEach(line => {
-        const items = parseMappingLine(line);
-        if (items.length > 0) {
-            items.forEach(item => {
-                const indexes = parseSuffix(item.suffix);
-                indexes.forEach(idx => {
-                    if (idx - 1 < maxIdx) {
-                        records[idx - 1].PaperTitle = item.val;
-                    }
-                });
-            });
-        } else {
-            // Apply as constant to all certificates
-            records.forEach(record => {
-                record.PaperTitle = line;
-            });
-        }
-    });
+    classification.Designation.forEach(line => applyMappedLine(line, 'Designation'));
+    classification.PaperTitle.forEach(line => applyMappedLine(line, 'PaperTitle'));
 
     // Apply the publication details (DOI-derived or hand-entered) as constants to every certificate.
     const pub = getPublicationInfo();
@@ -386,13 +426,13 @@ function parseSuffix(suffix) {
             const start = parseInt(parts[0], 10);
             const end = parseInt(parts[1], 10);
             if (!isNaN(start) && !isNaN(end)) {
-                for (let i = start; i <= end; i++) {
+                for (let i = Math.max(start, 1); i <= end; i++) {
                     indexes.push(i);
                 }
             }
         } else {
             const idx = parseInt(part, 10);
-            if (!isNaN(idx)) {
+            if (!isNaN(idx) && idx >= 1) {
                 indexes.push(idx);
             }
         }
@@ -503,7 +543,7 @@ function dedupeJoin(values) {
 // Build the single synthetic record used by Group Download: every recipient's name and
 // designation combined onto one certificate, rather than one certificate per recipient.
 function buildGroupRecord() {
-    const first = state.records[0];
+    const first = state.records[0] || {};
     return {
         NAME: state.records.map(r => r.NAME).join(', '),
         Designation: dedupeJoin(state.records.map(r => r.Designation)),
@@ -516,15 +556,21 @@ function buildGroupRecord() {
     };
 }
 
-// Trigger a browser download of a blob, then release the object URL once the click is queued.
+// Trigger a browser download of a blob. The object URL and the anchor are cleaned up on a
+// timer rather than synchronously: revoking the URL (or removing the anchor) in the same tick
+// as the click can abort the download in some browsers, which matters most for the larger
+// combined files and for the rapid back-to-back downloads in "Multiple Downloads".
 function triggerDownload(blob, filename) {
+    const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
-    link.href = URL.createObjectURL(blob);
+    link.href = url;
     link.download = filename;
     document.body.appendChild(link);
     link.click();
-    document.body.removeChild(link);
-    URL.revokeObjectURL(link.href);
+    setTimeout(() => {
+        document.body.removeChild(link);
+        URL.revokeObjectURL(url);
+    }, 1000);
 }
 
 // Reduce a placeholder tag to a canonical form so lookups tolerate case and spacing differences:
@@ -533,9 +579,23 @@ function normalizeTag(tag) {
     return String(tag).toLowerCase().replace(/[\s_]+/g, '');
 }
 
+// Curly braces are docxtemplater's tag delimiters, so a literal "{" or "}" in user text
+// (e.g. a paper title like "Study on {AI} Systems") would be parsed as a broken tag and the
+// text between them silently dropped. Swap them for the full-width look-alikes so every other
+// special character (&, <, >, %, quotes, dashes, ...) passes straight through untouched --
+// docxtemplater XML-escapes those itself.
+function neutralizeBraces(value) {
+    return String(value == null ? '' : value).replace(/\{/g, '｛').replace(/\}/g, '｝');
+}
+
 // 3. Generate a filled DOCX package (PizZip instance) for one record
 function renderDocxZipForRecord(record) {
     const docZip = new window.PizZip(state.docxBuffer);
+
+    const name = neutralizeBraces(record.NAME ? record.NAME.toUpperCase() : '');
+    const designation = neutralizeBraces(record.Designation || '');
+    const paperTitle = neutralizeBraces(record.PaperTitle || '');
+    const doi = record.DOI || '';
 
     // Canonical values, keyed by normalized tag name. This backs the nullGetter below, which
     // catches placeholders whose spelling doesn't exactly match a key in setData -- notably the
@@ -543,10 +603,10 @@ function renderDocxZipForRecord(record) {
     // nullGetter would stamp the literal text "undefined" onto the certificate. Unknown tags
     // resolve to an empty string rather than failing the render.
     const canonical = {
-        name: record.NAME ? record.NAME.toUpperCase() : '',
-        designation: record.Designation || '',
-        papertitle: record.PaperTitle || '',
-        doi: record.DOI || '',
+        name: name,
+        designation: designation,
+        papertitle: paperTitle,
+        doi: doi,
         vol: record.Volume || '',
         volume: record.Volume || '',
         issue: record.Issue || '',
@@ -565,16 +625,16 @@ function renderDocxZipForRecord(record) {
 
     // Map data (support both space, no space, underscore, and case variants for absolute safety)
     doc.setData({
-        NAME: record.NAME ? record.NAME.toUpperCase() : '',
-        name: record.NAME ? record.NAME.toUpperCase() : '',
-        Designation: record.Designation || '',
-        designation: record.Designation || '',
-        "Paper Title": record.PaperTitle || '',
-        "paper title": record.PaperTitle || '',
-        PaperTitle: record.PaperTitle || '',
-        papertitle: record.PaperTitle || '',
-        DOI: record.DOI || '',
-        doi: record.DOI || '',
+        NAME: name,
+        name: name,
+        Designation: designation,
+        designation: designation,
+        "Paper Title": paperTitle,
+        "paper title": paperTitle,
+        PaperTitle: paperTitle,
+        papertitle: paperTitle,
+        DOI: doi,
+        doi: doi,
         vol: record.Volume || '',
         Volume: record.Volume || '',
         issue: record.Issue || '',
@@ -645,7 +705,14 @@ function buildCombinedDocxBlob(records) {
 // wrapper so a user can't fire two exports at once, and errors from any mode are logged the
 // same way.
 async function runDownload(btnEl, task) {
-    if (state.records.length === 0 || !state.docxLoaded) return;
+    if (!state.docxLoaded) {
+        log('Select a journal template first.', 'error');
+        return;
+    }
+    if (state.records.length === 0) {
+        log('Enter recipient data first — at least one name with a numeric suffix (e.g. "Ravi Kumar1").', 'error');
+        return;
+    }
 
     const initialHTML = btnEl.innerHTML;
     toggleButtons(false);
@@ -700,8 +767,19 @@ async function handleDownloadGroup() {
     });
 }
 
-// DOM trigger
-document.addEventListener('DOMContentLoaded', init);
-if (document.readyState === 'interactive' || document.readyState === 'complete') {
+// DOM trigger. Guarded so init() runs exactly once regardless of whether the DOM was still
+// parsing when this script executed: without the flag, a script that runs after DOMContentLoaded
+// would fall through to the immediate call, while one that runs before it would fire on the
+// event -- and any setup that registered both paths would bind every listener twice, doubling
+// clicks (and downloads).
+let initialized = false;
+function bootstrap() {
+    if (initialized) return;
+    initialized = true;
     init();
+}
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', bootstrap);
+} else {
+    bootstrap();
 }
