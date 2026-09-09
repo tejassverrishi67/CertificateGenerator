@@ -26,7 +26,7 @@ if (-not (Test-Path $OutputDir)) {
     New-Item -ItemType Directory -Force -Path $OutputDir | Out-Null
 }
 
-$files = Get-ChildItem -Path $InputDir -Filter *.docx -File | Sort-Object Name
+$files = @(Get-ChildItem -Path $InputDir -Filter *.docx -File | Sort-Object Name)
 if ($files.Count -eq 0) {
     Write-Output 'NO_FILES'
     exit 0

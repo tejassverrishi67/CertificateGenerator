@@ -151,6 +151,21 @@ async function handleConvert(req, res) {
     }
 }
 
+// Files/extensions that must never be served even though they live under the project root:
+// server-side source, the PDF-conversion script, docs, and any dotfile/dotdir (.git,
+// .claude/settings.local.json, .vercelignore, ...). Everything else under ROOT (index.html,
+// app.js, styles.css, templates/, logos/) is meant to be public.
+const DENY_BASENAMES = new Set(['server.js', 'convert-docx-to-pdf.ps1']);
+const DENY_EXTENSIONS = new Set(['.ps1', '.md']);
+function isServable(relPath) {
+    const segments = relPath.split(/[\\/]/).filter(Boolean);
+    if (segments.some(seg => seg.startsWith('.'))) return false;
+    const base = path.basename(relPath);
+    if (DENY_BASENAMES.has(base)) return false;
+    if (DENY_EXTENSIONS.has(path.extname(relPath).toLowerCase())) return false;
+    return true;
+}
+
 async function serveStatic(req, res) {
     const urlPath = decodeURIComponent(new URL(req.url, 'http://localhost').pathname);
     const rel = urlPath === '/' ? 'index.html' : urlPath.replace(/^\/+/, '');
@@ -158,6 +173,10 @@ async function serveStatic(req, res) {
 
     // Prevent path traversal outside the project directory
     if (!filePath.startsWith(ROOT + path.sep) && filePath !== path.join(ROOT, 'index.html')) {
+        send(res, 403, 'Forbidden');
+        return;
+    }
+    if (!isServable(rel)) {
         send(res, 403, 'Forbidden');
         return;
     }

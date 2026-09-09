@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Zero-Styling Bulk Certificate Generator (DOCX)</title>
-    <meta name="description" content="Generate certificates in bulk from a Word (DOCX) template, exported as DOCX and as a pixel-accurate PDF rendered from that same DOCX.">
+    <meta name="description" content="Generate certificates in bulk from a Word (DOCX) template, exported as DOCX -- combined, individually, or as a single group certificate.">
     <!-- Google Fonts -->
     <!-- SRI needs to be added manually: this URL serves dynamically-generated CSS that varies by user agent/browser and is not a fixed pinned asset, so no single hash is valid for all clients -->
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
@@ -51,6 +51,23 @@
                         </div>
                         <textarea id="data-input" placeholder="Name One1,Name Two2&#10;Student,CSE,CIT,Chennai,India1-2&#10;Sample Paper Title1-2" rows="6"></textarea>
                     </div>
+                </div>
+
+                <div class="card" id="preview-card" hidden>
+                    <div class="card-header">
+                        <i class="fa-solid fa-table-list"></i>
+                        <h2>Parsed Preview</h2>
+                    </div>
+                    <div id="parse-warnings" class="parse-warnings"></div>
+                    <div class="preview-table-wrap">
+                        <table id="preview-table">
+                            <thead>
+                                <tr><th>#</th><th>Name</th><th>Designation</th><th>Paper Title</th></tr>
+                            </thead>
+                            <tbody id="preview-table-body"></tbody>
+                        </table>
+                    </div>
+                    <span id="preview-pub-info" class="preview-pub-info"></span>
                 </div>
 
                 <div class="card">
@@ -110,7 +127,7 @@
                 </div>
             </section>
 
-            <!-- Right Side: Live Logs -->
+            <!-- Right Side: Live Logs + Live Preview -->
             <section class="preview-panel">
                 <div class="card log-card">
                     <div class="card-header">
@@ -119,6 +136,17 @@
                     </div>
                     <div class="logs" id="logs-container">
                         <div class="log-entry system"><i class="fa-solid fa-info-circle"></i> Application initialized. Ready for template.</div>
+                    </div>
+                </div>
+
+                <div class="card live-preview-card">
+                    <div class="card-header">
+                        <i class="fa-solid fa-eye"></i>
+                        <h2>Live Preview</h2>
+                    </div>
+                    <p class="live-preview-hint">Mirrors section 2 &mdash; paper title, author names &amp; affiliations &mdash; as you type.</p>
+                    <div class="cert-preview" id="live-preview">
+                        <p class="cert-preview-empty">Paste data in section 2 to see how the certificate will read.</p>
                     </div>
                 </div>
             </section>
