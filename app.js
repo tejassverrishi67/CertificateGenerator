@@ -262,7 +262,21 @@ function parseDataInput(text) {
     // Keep original (pre-normalization) lines alongside normalized ones so the original
     // superscript-formatted author list can be reused verbatim (e.g. for output filenames),
     // while suffix/index parsing runs against the ASCII-digit normalized copy.
-    const origLines = text.split('\n').map(l => l.trim()).filter(l => l.length > 0);
+    const rawLines = text.split('\n').map(l => l.trim()).filter(l => l.length > 0);
+
+    // Journal author blocks routinely wrap one affiliation across two lines. A line that ends
+    // with a comma is a continuation, so stitch it onto the next line before classifying --
+    // otherwise the tail ("Tamil Nadu, India1") is parsed as its own line while the head
+    // ("Professor and Head, Department of Commerce,") loses its mapping suffix and is dropped.
+    const origLines = [];
+    rawLines.forEach(line => {
+        const prev = origLines[origLines.length - 1];
+        if (prev && /,$/.test(prev)) {
+            origLines[origLines.length - 1] = prev + ' ' + line;
+        } else {
+            origLines.push(line);
+        }
+    });
     const normLines = origLines.map(normalizeSuperscripts);
 
     // Classify lines dynamically
@@ -292,9 +306,15 @@ function parseDataInput(text) {
         const hadSuperscript = /[⁰¹²³⁴⁵⁶⁷⁸⁹]/.test(origLines[i] || '');
         const words = parsed.length === 1 ? parsed[0].val.split(/\s+/).filter(Boolean).length : 0;
 
-        // 1. Honorific prefix ("Mr.", "Dr ", "Prof.") is an unambiguous name marker. The dot
-        //    or the space after it is required so ordinary names ("Mrinal1", "Drithi1") don't match.
-        if (/(^|[\s,(])(Mr|Mrs|Ms|Dr|Prof)(\.|\s)/i.test(trimmed)) {
+        // 1. An honorific ("Mr.", "Dr ", "Prof.") at the START of a comma-separated author
+        //    segment that also carries a mapping suffix ("Dr. Arunpriya S1") is an unambiguous
+        //    name marker. Requiring it at the segment start -- not anywhere in the line -- keeps
+        //    an institution whose name contains an honorific ("Dr. N.G.P. Arts and Science
+        //    College") from turning its whole affiliation line into a spurious name. The dot or
+        //    space after the honorific keeps ordinary names ("Mrinal1", "Drithi1") from matching.
+        const honorificName = parsed.some(item =>
+            /^\(?(Mr|Mrs|Ms|Dr|Prof)(\.|\s)/i.test(item.val.trim()) && /\d/.test(item.suffix));
+        if (honorificName) {
             addName(trimmed, origLines[i]);
             return;
         }
