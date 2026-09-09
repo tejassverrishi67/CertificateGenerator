@@ -89,6 +89,12 @@ function init() {
         toggleButtons(false);
         log('DOCX libraries (PizZip/docxtemplater) failed to load from the CDN -- downloads are disabled. Check your network connection and reload the page.', 'error');
     }
+
+    // The Live Preview needs docx-preview (+ JSZip). It's non-critical -- downloads still work
+    // and the panel falls back to a text summary -- so this is a note, not an error.
+    if (!docxPreviewAvailable()) {
+        log('Live preview renderer (docx-preview) failed to load from the CDN -- the preview panel will show a plain-text summary instead.', 'system');
+    }
 }
 
 // Build the template picker from TEMPLATES -- the array is the only place a journal is defined.
@@ -823,33 +829,102 @@ function renderPreview(records, warnings) {
     el.previewPubInfo.textContent = parts.join('  ·  ');
 }
 
-// Live Preview -- a plain-language mock of how section 2's content (paper title, author names,
-// affiliations) will read on the finished certificate, refreshed on every keystroke in the
-// paste box. It renders the SAME parsed records that drive the download, so a misread line is
-// visible here immediately rather than only after opening the .docx. Scope is deliberately
-// limited to what section 2 supplies -- title, names, affiliations -- and it mirrors the
-// parser's own states: a placeholder when the box is empty, the parse error when the text
-// can't be read yet, otherwise the parsed certificate content.
+// Live Preview -- an actual render of the generated Word certificate (the first recipient's
+// page), redrawn as section 2 is edited so the real output layout is visible before any
+// download. The same docxtemplater pipeline that builds the downloads produces the .docx here;
+// docx-preview then renders that .docx to HTML in the panel.
+//
+// It mirrors the parser's states: a prompt when there's no template or no data yet, the parse
+// error when the text can't be read, otherwise the rendered certificate. If docx-preview or its
+// JSZip dependency failed to load from the CDN, it degrades to renderLivePreviewMock() -- a
+// plain-text summary of the parsed fields -- rather than showing nothing.
+//
+// The heavy .docx render is debounced and guarded by a generation counter: fast typing only
+// pays for the final render, and a slow render that finishes after a newer edit is discarded
+// instead of overwriting the current preview.
+let livePreviewGen = 0;
+let livePreviewTimer = null;
+
+function showLivePreviewMsg(box, text, cls) {
+    const p = document.createElement('p');
+    p.className = cls;
+    p.textContent = text;
+    box.replaceChildren(p);
+}
+
+function docxPreviewAvailable() {
+    return typeof window.JSZip === 'function'
+        && window.docx && typeof window.docx.renderAsync === 'function';
+}
+
 function renderLivePreview({ records = [], error = '' } = {}) {
     const box = el.livePreview;
     if (!box) return;
-    box.innerHTML = '';
 
-    const placeholder = (cls, text) => {
-        const p = document.createElement('p');
-        p.className = cls;
-        p.textContent = text;
-        box.appendChild(p);
-    };
+    // Any newer call invalidates an in-flight or pending render.
+    const gen = ++livePreviewGen;
+    clearTimeout(livePreviewTimer);
 
     if (error) {
-        placeholder('cert-preview-error', error);
+        showLivePreviewMsg(box, error, 'cert-preview-error');
         return;
     }
     if (!records || records.length === 0) {
-        placeholder('cert-preview-empty', 'Paste data in section 2 to see how the certificate will read.');
+        showLivePreviewMsg(box, 'Paste data in section 2 to preview the certificate.', 'cert-preview-empty');
         return;
     }
+    if (!state.docxLoaded) {
+        showLivePreviewMsg(box, 'Select a template in section 1 to preview the certificate.', 'cert-preview-empty');
+        return;
+    }
+    if (!docxPreviewAvailable()) {
+        renderLivePreviewMock(box, records);
+        return;
+    }
+
+    // Keep the current preview on screen until the new render is ready, then swap it in.
+    livePreviewTimer = setTimeout(() => runDocxPreview(box, records[0], records.length, gen), 300);
+}
+
+async function runDocxPreview(box, record, total, gen) {
+    try {
+        const blob = renderDocxBlobForRecord(record);
+        if (gen !== livePreviewGen) return;
+
+        const mount = document.createElement('div');
+        mount.className = 'docx-render';
+        // Pass the same node as body and style container so the injected <style> is removed
+        // with the render on the next swap. `.docx-render` is shrunk to a thumbnail with a
+        // static CSS `zoom` (see styles.css) -- kept static and out of JS because a
+        // measure-then-rescale pass on this image-heavy subtree drove Chromium into a layout
+        // loop that froze the tab.
+        await window.docx.renderAsync(blob, mount, mount, {
+            className: 'docxpv',
+            inWrapper: true,
+            ignoreLastRenderedPageBreak: true,
+        });
+        if (gen !== livePreviewGen) return;
+
+        box.replaceChildren(mount);
+
+        if (total > 1) {
+            const note = document.createElement('p');
+            note.className = 'cert-preview-note';
+            note.textContent = `Showing certificate 1 of ${total}.`;
+            box.appendChild(note);
+        }
+    } catch (err) {
+        if (gen !== livePreviewGen) return;
+        showLivePreviewMsg(box, `Couldn't render the certificate preview: ${err.message}`, 'cert-preview-error');
+        console.error(err);
+    }
+}
+
+// Fallback used only when docx-preview/JSZip didn't load: a plain-language summary of section
+// 2's parsed content (paper title, author names upper-cased as the .docx stamps them, and each
+// affiliation line) so the panel still says something useful.
+function renderLivePreviewMock(box, records) {
+    box.replaceChildren();
 
     const addLabel = text => {
         const d = document.createElement('div');
@@ -858,7 +933,6 @@ function renderLivePreview({ records = [], error = '' } = {}) {
         box.appendChild(d);
     };
 
-    // Paper title -- deduped across records, which normally all carry the same title.
     const title = dedupeJoin(records.map(r => r.PaperTitle));
     if (title) {
         addLabel('Paper Title');
@@ -868,8 +942,6 @@ function renderLivePreview({ records = [], error = '' } = {}) {
         box.appendChild(t);
     }
 
-    // One block per certificate: the name upper-cased exactly as renderDocxZipForRecord stamps
-    // it, above its affiliation/designation line.
     addLabel(records.length === 1 ? 'Author' : `Authors (${records.length})`);
     const authors = document.createElement('div');
     authors.className = 'cert-preview-authors';

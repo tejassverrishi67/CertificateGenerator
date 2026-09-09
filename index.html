@@ -13,6 +13,10 @@
     <!-- PizZip, Docxtemplater -->
     <script src="https://unpkg.com/pizzip@3.2.0/dist/pizzip.js" integrity="sha384-EKMdeygnsgFUPocowqWjGXhnzFAiDXk3KuOx8g8lsB5/JNEQYTWaADHxmioDiFU8" crossorigin="anonymous"></script>
     <script src="https://unpkg.com/docxtemplater@3.37.11/build/docxtemplater.js" integrity="sha384-XUWUxRatTw9TjvEarIjhP3i7SVLihybSpZk1JM8Kuw9EYHoiWarWs/R9K64R8L23" crossorigin="anonymous"></script>
+    <!-- docx-preview (with its JSZip dependency) renders the generated certificate DOCX to HTML for the live preview.
+         If either fails to load, the Live Preview panel falls back to a plain-text summary of the parsed fields. -->
+    <script src="https://unpkg.com/jszip@3.10.1/dist/jszip.min.js" integrity="sha384-+mbV2IY1Zk/X1p/nWllGySJSUN8uMs+gUAN10Or95UBH0fpj6GfKgPmgC5EXieXG" crossorigin="anonymous"></script>
+    <script src="https://unpkg.com/docx-preview@0.4.0/dist/docx-preview.min.js" integrity="sha384-UkwbeBm1NknJfLd5UU4RI1j7PidBeZE3tIiKY1k+n7RQ+kEJ0dkTC0u53xTtRC9r" crossorigin="anonymous"></script>
 </head>
 <body>
     <div class="container">
@@ -144,9 +148,9 @@
                         <i class="fa-solid fa-eye"></i>
                         <h2>Live Preview</h2>
                     </div>
-                    <p class="live-preview-hint">Mirrors section 2 &mdash; paper title, author names &amp; affiliations &mdash; as you type.</p>
+                    <p class="live-preview-hint">Renders the generated Word certificate for the first recipient, redrawn as you edit section 2.</p>
                     <div class="cert-preview" id="live-preview">
-                        <p class="cert-preview-empty">Paste data in section 2 to see how the certificate will read.</p>
+                        <p class="cert-preview-empty">Select a template and paste data to preview the certificate.</p>
                     </div>
                 </div>
             </section>
