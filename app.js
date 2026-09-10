@@ -894,10 +894,7 @@ async function runDocxPreview(box, record, total, gen) {
         const mount = document.createElement('div');
         mount.className = 'docx-render';
         // Pass the same node as body and style container so the injected <style> is removed
-        // with the render on the next swap. `.docx-render` is shrunk to a thumbnail with a
-        // static CSS `zoom` (see styles.css) -- kept static and out of JS because a
-        // measure-then-rescale pass on this image-heavy subtree drove Chromium into a layout
-        // loop that froze the tab.
+        // with the render on the next swap.
         await window.docx.renderAsync(blob, mount, mount, {
             className: 'docxpv',
             inWrapper: true,
@@ -905,7 +902,17 @@ async function runDocxPreview(box, record, total, gen) {
         });
         if (gen !== livePreviewGen) return;
 
-        box.replaceChildren(mount);
+        // Scale the full-size Word page down to fit the panel width. A wrapping frame is
+        // clipped to the scaled page box so there's no dead space beside a landscape page
+        // and no horizontal scrollbar. This is a single measure-then-transform pass, not a
+        // loop: `transform: scale()` is compositor-only so it doesn't relayout the
+        // image-heavy render subtree the way a dynamic CSS `zoom` did (which used to freeze
+        // the tab).
+        const frame = document.createElement('div');
+        frame.className = 'docx-scale-frame';
+        frame.appendChild(mount);
+        box.replaceChildren(frame);
+        fitDocxPreview(box, frame, mount);
 
         if (total > 1) {
             const note = document.createElement('p');
@@ -918,6 +925,83 @@ async function runDocxPreview(box, record, total, gen) {
         showLivePreviewMsg(box, `Couldn't render the certificate preview: ${err.message}`, 'cert-preview-error');
         console.error(err);
     }
+}
+
+// Shrink the rendered Word page so it fits the preview panel, whatever the template's page
+// size (portrait ~816px, landscape ~1123px at 96dpi). docx-preview does not lay these
+// templates out cleanly -- it pushes the certificate block hundreds of px off the page
+// origin, drops full-bleed background art at wild offsets, and for one template leaves an
+// ~870px vertical gap between the header and the body. So rather than scaling the nominal
+// page box (which would show a slab of blank page beside a clipped, off-centre certificate)
+// this measures where the text actually landed, finds the dense cluster the certificate
+// body forms, and fits a top-left `transform` to that. A single measure-then-transform
+// pass, no loop: `transform: scale()` is compositor-only and doesn't relayout the render.
+function fitDocxPreview(box, frame, mount) {
+    const page = mount.querySelector('section.docxpv');
+    if (!page) return;
+    const pageW = page.offsetWidth;
+    const pageH = page.offsetHeight;
+    if (!pageW || !pageH) return;
+
+    const pr = page.getBoundingClientRect();
+    const sc0 = pr.width / pageW || 1;
+    const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
+
+    // Collect the on-page text rects (page-local, unscaled). Images are skipped entirely --
+    // they're decorative here and docx-preview's placement of them is the least reliable.
+    const rects = [];
+    page.querySelectorAll('*').forEach(node => {
+        if (![...node.childNodes].some(n => n.nodeType === 3 && n.textContent.trim())) return;
+        const b = node.getBoundingClientRect();
+        if (b.width === 0 || b.height === 0) return;
+        rects.push({
+            l: (b.left - pr.left) / sc0, r: (b.right - pr.left) / sc0,
+            t: (b.top - pr.top) / sc0, b: (b.bottom - pr.top) / sc0,
+        });
+    });
+
+    let originX = 0, originY = 0, contentW = pageW, contentH = pageH;
+    if (rects.length) {
+        // Vertical outlier trim: sort by top edge and find the tightest window holding ~75%
+        // of the rects. That window is the certificate body; a stray header sitting far
+        // above it (or spacing junk far below) falls outside and is dropped from the crop.
+        const need = Math.max(1, Math.ceil(rects.length * 0.85));
+        const byTop = [...rects].sort((p, q) => p.t - q.t);
+        let bestI = 0, bestSpan = Infinity;
+        for (let i = 0; i + need <= byTop.length; i++) {
+            const span = byTop[i + need - 1].t - byTop[i].t;
+            if (span < bestSpan) { bestSpan = span; bestI = i; }
+        }
+        const core = byTop.slice(bestI, bestI + need);
+        const cl = Math.min(...core.map(x => x.l));
+        const cr = Math.max(...core.map(x => x.r));
+        const ct = Math.min(...core.map(x => x.t));
+        const cb = Math.max(...core.map(x => x.b));
+
+        // Pad a little, then clamp to a believable region so a rect that slipped the trim
+        // can't stretch the crop past ~1.6x the page in either axis.
+        const padX = pageW * 0.04, padY = pageH * 0.06;
+        const left = clamp(cl - padX, -0.1 * pageW, 0.55 * pageW);
+        const right = clamp(cr + padX, 0.55 * pageW, 1.6 * pageW);
+        const top = clamp(ct - padY, -0.15 * pageH, 0.85 * pageH);
+        const bottom = clamp(cb + padY, top + pageH * 0.2, top + pageH * 1.6);
+        if (right - left > pageW * 0.3 && bottom - top > pageH * 0.2) {
+            originX = Math.max(0, left);
+            originY = Math.max(0, top);
+            contentW = right - originX;
+            contentH = bottom - originY;
+        }
+    }
+
+    const cs = getComputedStyle(box);
+    const avail = box.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight);
+    const scale = Math.min(1, avail / contentW);
+
+    mount.style.transformOrigin = 'top left';
+    mount.style.transform = `translate(${-originX * scale}px, ${-originY * scale}px) scale(${scale})`;
+    mount.style.width = `${pageW}px`;
+    frame.style.width = `${Math.round(contentW * scale)}px`;
+    frame.style.height = `${Math.round(contentH * scale)}px`;
 }
 
 // Fallback used only when docx-preview/JSZip didn't load: a plain-language summary of section
